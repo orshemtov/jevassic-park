@@ -2890,10 +2890,9 @@ export function CoasterGrid({
     const handleResize = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        if (previousSize.width > 0) setOffset(previous => ({
-          x: previous.x + (rect.width - previousSize.width) / 2,
-          y: previous.y + (rect.height - previousSize.height) / 2,
-        }));
+        const dx = (rect.width - previousSize.width) / 2;
+        const dy = (rect.height - previousSize.height) / 2;
+        if (previousSize.width > 0) setOffset(previous => ({ x: previous.x + dx, y: previous.y + dy }));
         previousSize = { width: rect.width, height: rect.height };
         setCanvasSize(previousSize);
       }
