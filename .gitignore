@@ -1,0 +1,25 @@
+# Credentials and local tooling
+.env*
+!.env.example
+node_modules/
+.next/
+.vercel/
+coverage/
+*.tsbuildinfo
+.playwright-cli/
+.DS_Store
+
+# Internal agent context and plans
+.agents/
+.codex/
+AGENTS.md
+skills-lock.json
+IMPLEMENTATION_PLAN.md
+VIDEO_PLAN.md
+
+# Keep only the public screenshot from local documentation
+/docs/*
+!/docs/park-live.png
+
+# Internal recording and editing tools
+/video/

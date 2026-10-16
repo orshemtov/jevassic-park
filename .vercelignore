@@ -1,0 +1,13 @@
+.env
+.env.*
+.agents/
+.codex/
+AGENTS.md
+skills-lock.json
+IMPLEMENTATION_PLAN.md
+VIDEO_PLAN.md
+docs/
+video/
+.playwright-cli/
+coverage/
+.git/
