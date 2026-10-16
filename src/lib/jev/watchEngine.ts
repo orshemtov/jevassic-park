@@ -120,7 +120,7 @@ export function applyWatchDecisions(world: WatchWorld, actors: WatchActor[], dec
   }
   return { ...world, guests: world.guests.map(guest => accepted.has(guest.id) ? applyWatchAction(guest, accepted.get(guest.id)!) : guest),
     lastDecided: Object.fromEntries(world.guests.map(guest => [guest.id, accepted.has(guest.id) ? now : world.lastDecided?.[guest.id] ?? 0])),
-    feed: [...feed.reverse(), ...world.feed].slice(0, 50), mode, decisionCount: world.decisionCount + accepted.size,
+    feed: [...feed.reverse(), ...world.feed].filter(entry => entry.kind !== 'continue').slice(0, 50), mode, decisionCount: world.decisionCount + accepted.size,
     ...(world.announcement ? { announcement: { ...world.announcement,
       pending: world.announcement.pending.filter(id => !accepted.has(id)),
       processed: world.announcement.processed + feed.filter(entry => entry.broadcast).length,

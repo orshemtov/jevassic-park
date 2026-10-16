@@ -289,7 +289,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
           time: new Date().toLocaleTimeString() });
       }
       if (entries.length) {
-        const messages = entries.reverse().map(entry => ({ ...entry, id: ++feedSequence.current }));
+        const messages = entries.filter(entry => entry.kind !== 'continue').reverse().map(entry => ({ ...entry, id: ++feedSequence.current }));
         setFeed(previous => [...messages, ...previous].slice(0, 50));
       }
       setError(null);
@@ -420,7 +420,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       }
       if (!entries.length) return;
       setMode('offline');
-      setFeed(previous => [...entries.reverse(), ...previous].slice(0, 50));
+      setFeed(previous => [...entries.reverse(), ...previous].filter(entry => entry.kind !== 'continue').slice(0, 50));
       setDecisionCount(previous => previous + entries.length);
       setLastChoices(previous => ({ ...previous, ...choices }));
     }, 1000);
@@ -434,7 +434,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       previewTarget = preview.guests.length;
       setPopulation(preview.population);
       setTarget(preview.guests.length);
-      setFeed(preview.feed);
+      setFeed(preview.feed.filter(entry => entry.kind !== 'continue'));
       setMode('offline');
       setDecisionCount(preview.decisionCount);
       setLastChoices(Object.fromEntries(preview.feed.filter(entry => entry.guestId).toReversed().map(entry => [entry.guestId!, { action: entry.action }])));
@@ -466,7 +466,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
         }
         setPopulation(snapshot.population);
         setTarget(snapshot.guests.length);
-        setFeed(snapshot.feed);
+        setFeed(snapshot.feed.filter(entry => entry.kind !== 'continue'));
         setMode(snapshot.mode);
         setDecisionCount(snapshot.decisionCount);
         setLastChoices(Object.fromEntries(snapshot.feed.filter(entry => entry.guestId)

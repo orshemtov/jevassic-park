@@ -55,7 +55,8 @@ describe('shared spectator world', () => {
     expect(second.park).toEqual(snapshot);
     expect(second.announcement).toBe(first.announcement);
     expect(second.actors.every(actor => !first.actors.some(previous => previous.id === actor.id))).toBe(true);
-    expect(world.feed.every(entry => entry.name.length > 0 && entry.mode === 'live')).toBe(true);
+    expect(world.feed).toEqual([]);
+    expect(world.decisionCount).toBe(first.actors.length);
     expect(world.announcement).toMatchObject({ total: 10, processed: first.actors.length, changed: 0, stayed: first.actors.length });
   });
 
@@ -142,6 +143,8 @@ it('only attributes choices matching the announcement to the radio', () => {
     { id: batch.actors[2].id, action: 'continue' },
   ], 'live', now);
   expect(next.announcement).toMatchObject({ processed: 2, responded: 1, changed: 1, stayed: 1 });
+  expect(next.feed).toHaveLength(1);
+  expect(next.feed[0].kind).toBe('ride');
   expect(next.feed.find(entry => entry.guestId === batch.actors[0].id)?.radio)
     .toEqual({ id: world.announcement!.id, text: 'The parade is starting.', at: world.announcement!.at });
   expect(next.feed.some(entry => entry.guestId === batch.actors[1].id)).toBe(false);
