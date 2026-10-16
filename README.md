@@ -12,7 +12,8 @@
 - **One shared park** for every spectator. Spending happens while people watch.
 - **Live decisions** with guest names. Follow a choice to follow its guest.
 - **Random announcements** that give guests a reason to change plans.
-- Animated rides, water, weather, day and night, and an original fantasy soundtrack.
+- Animated rides, water, weather, day and night.
+- **Music:** five original fantasy tracks, shuffled, with parade, snack and ride cues.
 - A local admin mode for testing crowds, budgets, tempo and broadcasts.
 
 - **Honest counts:** background figures do not make AI calls or inflate service usage.
@@ -93,3 +94,5 @@ Keep credentials server-side. The equivalent `UPSTASH_REDIS_REST_URL` and `UPSTA
 Based on [IsoCoaster](https://github.com/amilich/isometric-city). See [LICENSE](LICENSE) for the MIT license.
 
 Font: [Fraunces · OFL](public/licenses/fraunces-OFL.txt). Music: original.
+
+Regenerate the additional music: `python scripts/compose-music.py` (NumPy + ffmpeg).

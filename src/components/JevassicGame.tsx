@@ -11,6 +11,7 @@ import type { GameState } from '@/games/coaster/types/game';
 import type { Guest } from '@/games/coaster/types/economy';
 import { announcementDelay, nextParkAnnouncement, isCurrentRadioReaction, type RadioReaction } from '@/lib/jev/announcements';
 import { attractionActivity, activityLabels, emptyActivity } from '@/lib/jev/attractionActivity';
+import type { ParkMusicState } from '@/lib/jev/parkMusic';
 import { connectParkAudio } from '@/lib/jev/parkAudio';
 import { recordPark, type RecordingSnapshot } from '@/lib/recordPark';
 
@@ -55,6 +56,8 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
   const [soundPlaying, setSoundPlaying] = useState(false);
   const [soundBlocked, setSoundBlocked] = useState(false);
   const parkAudio = useRef<HTMLAudioElement>(null);
+  const parkMusic = useRef<ParkMusicState>({ track: 0, remaining: [], cue: null, resumeAt: 0, lastEventAt: 0 });
+  const lastMusicAnnouncement = useRef<number | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordedClip, setRecordedClip] = useState<string | null>(null);
   const recorder = useRef<ReturnType<typeof recordPark> | null>(null);
@@ -522,7 +525,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
   useEffect(() => {
     const audio = parkAudio.current;
     if (!audio) return;
-    return connectParkAudio(audio, soundEnabled, running, setSoundPlaying, setSoundBlocked, () => setSoundEnabled(false));
+    return connectParkAudio(audio, soundEnabled, running, setSoundPlaying, setSoundBlocked, () => setSoundEnabled(false), parkMusic.current);
   }, [soundEnabled, running, isStateReady]);
 
   const selectedActivity = selectedBuilding ? attractionActivity(state.guests).get(`${selectedBuilding.x},${selectedBuilding.y}`) ?? emptyActivity() : null;
@@ -563,6 +566,14 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
   }, [specialEvent]);
 
   const announcementId = announcement?.id;
+  const announcementText = announcement?.text;
+  useEffect(() => {
+    if (announcementId == null || announcementId === lastMusicAnnouncement.current || !showAnnouncement) return;
+    lastMusicAnnouncement.current = announcementId;
+    if (soundEnabled && soundPlaying && running) {
+      parkAudio.current?.dispatchEvent(new CustomEvent('park-music-event', { detail: announcementText }));
+    }
+  }, [announcementId, announcementText, showAnnouncement, soundEnabled, soundPlaying, running]);
   useEffect(() => {
     if (announcementId == null) return;
     const timeout = setTimeout(() => setShowAnnouncement(false), 45_000);
@@ -595,7 +606,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
 
   return (
     <main className="h-dvh w-screen bg-[#080f12] text-[#e9f2ed] flex flex-col overflow-hidden">
-      <audio ref={parkAudio} src="/assets/park-score.m4a?v=2" loop preload="none" />
+      <audio ref={parkAudio} preload="none" />
       <header className="h-16 shrink-0 border-b border-[#675044] bg-[#1d2021] flex items-center justify-between px-5 gap-4">
         <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#ffe374]">🎢 JEVASSIC PARK</h1>
         <div className="flex items-center gap-3 text-xs md:text-sm"><span className="text-[#9bb5ad]">Guests <b className="text-white">{(state.guests.length + ambientCount).toLocaleString()}</b></span>

@@ -6,6 +6,8 @@ node_modules/
 .vercel/
 coverage/
 *.tsbuildinfo
+__pycache__/
+*.pyc
 .playwright-cli/
 .DS_Store
 
