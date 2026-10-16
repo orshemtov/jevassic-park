@@ -81,7 +81,7 @@ for coaster, (x, y, kind) in zip(park['coasters'], stations):
     place(kind, x, y, track=True)
     coaster.update(stationTileX=x, stationTileY=y)
 
-# Main Street, central square, and generous promenades linking four lands.
+# Main Street, central square, and promenades linking the themed areas.
 avenue(29, 36, 29, 59, 3)
 for a in [(24,24,36,24),(24,35,36,35),(24,24,24,35),(35,24,35,35),
           (7,32,24,32),(35,30,54,30),(33,6,33,24),
@@ -90,6 +90,7 @@ for a in [(24,24,36,24),(24,35,36,35),(24,24,24,35),(35,24,35,35),
           (38,36,54,36),(38,53,54,53),(38,30,38,53),(53,30,53,53),
           (24,47,38,47),(7,6,33,6),(7,6,7,32)]:
     avenue(*a)
+avenue(8, 11, 33, 11, 1)  # Northern midway between the two coaster entrances.
 
 # Castle court and central fountain: separate landmarks with open space around them.
 place('ride_themed_facade', 28, 27)
@@ -107,6 +108,11 @@ placements = [
     ('restroom',25,55),('first_aid',34,55),('park_entrance',29,56),
     ('food_burger',15,31),('drink_soda',11,31),('restroom',21,31),
     ('restroom',51,18),('restroom',15,49),('restroom',46,51),
+    ('food_corndog',10,13),('drink_coffee',29,13),('restroom',30,17),
+    ('ride_haunted_house',10,8),('ride_ferris_classic',24,8),
+    ('ride_teacups',13,13),('ride_tilt_a_whirl',18,13),
+    ('ride_kiddie_train',23,13),('ride_ghost_train',28,14),
+    ('ride_wave_swinger',27,18),
 ]
 for kind,x,y in placements:
     place(kind,x,y)
@@ -179,7 +185,7 @@ def connect(x, y, kind):
 for row in grid:
     for tile in row:
         kind=tile['building']['type']
-        if not kind.endswith('_footprint') and (kind == 'restroom' or kind.startswith(('ride_','show_','station_','food_','drink_','shop_','arcade_'))):
+        if not kind.endswith('_footprint') and (kind in ('restroom','first_aid') or kind.startswith(('ride_','show_','station_','food_','drink_','shop_','arcade_'))):
             connect(tile['x'],tile['y'],kind)
 
 # Castle court is a paved gathering square with planted islands.

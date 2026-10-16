@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { getBuildingSpriteHitboxes, guestScreenPoint, inspectBuilding, inspectBuildingSprite, screenToGrid } from './CoasterGrid';
 import { createGuest } from './guests/guestSystem';
 import type { Tile } from '@/games/coaster/types';
@@ -14,6 +14,18 @@ describe('park map inspection', () => {
     expect(middle.y - start.y).toBeCloseTo(9.6);
     expect(end.x - start.x).toBeCloseTo(32);
     expect(end.y - start.y).toBeCloseTo(19.2);
+  });
+  it('keeps hit testing and depth placement on the visibly corrected guest', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    const guest = { ...createGuest(10, 10, 60), tileX: 10, tileY: 10,
+      targetTileX: 11, targetTileY: 10, state: 'walking' as const, progress: 0,
+      walkOffset: 0, visualCorrection: { x: 64, y: 38.4, at: 10_000 } };
+    const plain = guestScreenPoint({ ...guest, visualCorrection: undefined });
+    const visible = guestScreenPoint(guest);
+    expect(visible.x - plain.x).toBeCloseTo(64);
+    expect(visible.y - plain.y).toBeCloseTo(38.4);
+    expect(screenToGrid(visible.x, visible.y, 0, 0)).toEqual({ gridX: 12, gridY: 10 });
+    vi.restoreAllMocks();
   });
   it('maps a visible tile center and nearby points to that tile', () => {
     const x = (13 - 18) * 32 + 32;

@@ -20,6 +20,8 @@ import { attractionActivity, activityEvents, activityEventText, activityLabels, 
 import { createAmbientCrowd, drawAmbientCrowdTile } from '@/lib/jev/ambientCrowd';
 import type { ParkSpectacle } from '@/lib/jev/spectacles';
 import { drawParadeTile, drawSpectacleSky, drawGuestCelebration } from './spectacleDrawing';
+import { drawParkWeather } from './weatherDrawing';
+import { guestVisualOffset } from '@/lib/jev/spectatorMotion';
 
 // Track tools that support drag-to-draw
 const TRACK_DRAG_TOOLS: Tool[] = [
@@ -240,9 +242,10 @@ export function guestScreenPoint(guest: Guest): { x: number; y: number } {
       y = start.screenY + (building.screenY - start.screenY) * approach + TILE_HEIGHT / 2;
     }
   }
+  const correction = guestVisualOffset(guest);
   return {
-    x: x + Math.cos(guest.walkOffset * 5) * TILE_WIDTH * 0.18,
-    y: y + Math.sin(guest.walkOffset * 7) * TILE_HEIGHT * 0.12,
+    x: x + correction.x + Math.cos(guest.walkOffset * 5) * TILE_WIDTH * 0.18,
+    y: y + correction.y + Math.sin(guest.walkOffset * 7) * TILE_HEIGHT * 0.12,
   };
 }
 
@@ -2881,12 +2884,18 @@ export function CoasterGrid({
     }
   );
   
-  // Handle resize
+  // Preserve the camera center when rotating a phone or resizing the window.
   useEffect(() => {
+    let previousSize = { width: 0, height: 0 };
     const handleResize = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        setCanvasSize({ width: rect.width, height: rect.height });
+        if (previousSize.width > 0) setOffset(previous => ({
+          x: previous.x + (rect.width - previousSize.width) / 2,
+          y: previous.y + (rect.height - previousSize.height) / 2,
+        }));
+        previousSize = { width: rect.width, height: rect.height };
+        setCanvasSize(previousSize);
       }
     };
     
@@ -3002,11 +3011,10 @@ export function CoasterGrid({
         const ride = guest.queueRideId ?? guest.targetBuildingId;
         if (ride) rideOccupancy.set(ride, (rideOccupancy.get(ride) ?? 0) + 1);
       }
-      // Use effective tile position for z-ordering:
-      // If progress >= 0.5, guest visually appears on target tile
-      const effectiveX = guest.progress >= 0.5 ? guest.targetTileX : guest.tileX;
-      const effectiveY = guest.progress >= 0.5 ? guest.targetTileY : guest.tileY;
-      const key = `${effectiveX},${effectiveY}`;
+      // Snapshot smoothing can leave the visible guest a tile away from its logical position.
+      const point = guestScreenPoint(guest);
+      const { gridX, gridY } = screenToGrid(point.x, point.y, 0, 0);
+      const key = `${Math.max(0, Math.min(gridSize - 1, gridX))},${Math.max(0, Math.min(gridSize - 1, gridY))}`;
       const existing = guestsByTile.get(key);
       if (existing) {
         existing.push(guest);
@@ -3238,6 +3246,18 @@ const tile = grid[y][x];
           drawGrassTile(ctx, screenX, screenY, zoom);
         }
         
+      }
+    }
+
+    // Flat terrain must be finished before people cross tile boundaries.
+    for (let sum = 0; sum < gridSize * 2 - 1; sum++) {
+      for (let x = 0; x <= sum; x++) {
+        const y = sum - x;
+        if (x >= gridSize || y >= gridSize || y < 0) continue;
+        const { screenX, screenY } = gridToScreen(x, y, 0, 0);
+        if (screenX < viewLeft || screenX > viewRight || screenY < viewTop || screenY > viewBottom) continue;
+        const tile = grid[y][x];
+
         // Draw coaster track if present
         if (tile.trackPiece) {
           // Look up the coaster's colors and category for this track
@@ -3530,11 +3550,12 @@ const tile = grid[y][x];
       lastTime = currentTime;
       
       // Update clouds
-      updateClouds(delta, state.speed);
+      if (!reducedMotionRef.current) updateClouds(delta, state.speed);
       
       // Clear and draw clouds
       ctx.clearRect(0, 0, cloudCanvas.width, cloudCanvas.height);
       drawClouds(ctx);
+      drawParkWeather(ctx, state.weather.current, canvasSize.width, canvasSize.height, currentTime / 1000, dpr, reducedMotionRef.current);
       
       animationId = requestAnimationFrame(animate);
     };
@@ -3544,7 +3565,7 @@ const tile = grid[y][x];
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [canvasSize, updateClouds, drawClouds, state.speed]);
+  }, [canvasSize, updateClouds, drawClouds, state.speed, state.weather]);
   
   // Helper to calculate tiles in a line from start to end (with direction locking)
   const calculateLineTiles = useCallback((

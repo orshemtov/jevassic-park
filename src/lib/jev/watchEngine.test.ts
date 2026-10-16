@@ -59,6 +59,8 @@ describe('shared spectator world', () => {
     expect(first.actors.length).toBeLessThanOrEqual(8);
     world = applyWatchDecisions(world, first.actors, first.actors.map(actor => ({ id: actor.id, action: 'continue' })), 'live', now);
     world = advanceWatchWorld(world, park, now + 2000);
+    // Busy guests keep their plan; idle guests get an ordinary turn before the next radio batch.
+    world.guests = world.guests.map(guest => first.actors.some(actor => actor.id === guest.id) ? { ...guest, decisionCooldown: 100 } : guest);
     const second = buildWatchBatch(world, park);
     expect(second.park).toEqual(snapshot);
     expect(second.announcement).toBe(first.announcement);
@@ -85,7 +87,7 @@ describe('shared spectator world', () => {
     const ordinary = buildWatchBatch(world, park);
     expect(ordinary.announcement).toBeUndefined();
     expect(ordinary.actors.map(actor => actor.id)).toContain(world.guests[1].id);
-    world.guests = world.guests.map(guest => guest.id === busyId ? { ...guest, state: 'walking' } : guest);
+    world.guests = world.guests.map(guest => guest.id === busyId ? { ...guest, state: 'walking' } : { ...guest, decisionCooldown: 100 });
     const deferred = buildWatchBatch(world, park);
     expect(deferred.actors.map(actor => actor.id)).toEqual([busyId]);
     expect(deferred.park).toEqual(snapshot);
@@ -180,4 +182,31 @@ it('offers only continuation when a broadcast show will finish before arrival', 
   const batch = buildWatchBatch(world, park, now + world.spectacle!.durationMs - 10000);
   expect(batch.actors).toHaveLength(8);
   expect(batch.actors.every(actor => actor.actions.length === 1 && actor.actions[0].id === 'continue')).toBe(true);
+});
+
+it('lets idle guests resume normal life while others are still hearing the radio', () => {
+  let world = createWatchWorld(park, 10, now);
+  world = advanceWatchWorld({ ...world, watchedMs: 45000 }, park, now);
+  const heard = world.guests[0];
+  world.announcement!.pending = world.guests.slice(1).map(guest => guest.id);
+  world.guests[0] = { ...heard, state: 'walking', path: [], progress: 0, targetBuildingId: null, queueRideId: null, decisionCooldown: 0, hunger: 100 };
+  const batch = buildWatchBatch(world, park);
+  expect(batch.announcement).toBeUndefined();
+  expect(batch.actors.map(actor => actor.id)).toContain(heard.id);
+  const action = batch.actors[0].actions.find(action => action.kind === 'food')!;
+  expect(action).toBeDefined();
+  const next = applyWatchDecisions(world, batch.actors, [{ id: heard.id, action: action.id }], 'live', now);
+  expect(next.guests[0].targetBuildingId).toBeTruthy();
+  expect(next.announcement!.pending).toEqual(world.announcement!.pending);
+  expect(next.feed[0].radio).toBeUndefined();
+});
+
+it('leaves a full normal-play interval after the last radio response', () => {
+  let world = createWatchWorld(park, 10, now);
+  world = advanceWatchWorld({ ...world, watchedMs: 45000 }, park, now);
+  world.announcement!.pending = [world.guests[0].id];
+  const batch = buildWatchBatch(world, park);
+  const next = applyWatchDecisions(world, batch.actors, [{ id: batch.actors[0].id, action: 'continue' }], 'live', now);
+  expect(next.announcement!.pending).toEqual([]);
+  expect(next.nextAnnouncementAt - next.watchedMs).toBeGreaterThanOrEqual(60000);
 });

@@ -44,6 +44,7 @@ type WatchSnapshot = Pick<GameState, 'hour' | 'minute' | 'weather'> & { guests: 
 function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, spectatorPopulation }: GameOptions) {
   const { state, latestStateRef, isStateReady, setSpeed, setGuestTarget, applyGuestChoice,
     setParkSettings, startHotdogGiveaway, clearGuests, applySpectatorSnapshot } = useCoaster();
+  const [feedExpanded, setFeedExpanded] = useState(false);
   const [target, setTarget] = useState(adminMode ? 10 : 100);
   const [population, setPopulation] = useState(adminMode ? 10 : spectatorPopulation);
   const [decisionIntervalMs, setDecisionIntervalMs] = useState(initialDecisionIntervalMs);
@@ -664,6 +665,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
   const selectedIsAudience = selectedGuest?.state === 'riding' && selectedVenue && /show_parade|fountain|castle/.test(state.grid[selectedVenue[1]]?.[selectedVenue[0]]?.building.type ?? '');
   const ambientCount = (running || state.guests.length > 0) ? Math.max(0, population - target) : 0;
   const focusGuest = (id: string, zoom = 1.6) => {
+    setFeedExpanded(false);
     stopDirector();
     const guest = latestStateRef.current.guests.find(item => item.id === id);
     if (!guest) return;
@@ -687,9 +689,9 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
   if (!isStateReady) return <main className="h-screen grid place-items-center bg-[#080f12] text-[#d7fa81]">Loading Jevassic Park…</main>;
 
   return (
-    <main className="h-dvh w-screen bg-[#080f12] text-[#e9f2ed] flex flex-col overflow-hidden">
+    <main className="jevassic-shell h-dvh w-screen bg-[#080f12] text-[#e9f2ed] flex flex-col overflow-hidden">
       <audio ref={parkAudio} preload="none" />
-      <header className="h-16 shrink-0 border-b border-[#675044] bg-[#1d2021] flex items-center justify-between px-5 gap-4">
+      <header className="park-header h-16 shrink-0 border-b border-[#675044] bg-[#1d2021] flex items-center justify-between px-5 gap-4">
         <h1 className="text-xl md:text-2xl font-black tracking-tight text-[#ffe374]">🎢 JEVASSIC PARK</h1>
         <div className="flex items-center gap-3 text-xs md:text-sm"><span className="text-[#9bb5ad]">Guests <b className="text-white">{(state.guests.length + ambientCount).toLocaleString()}</b></span>
           {adminMode && <span className="hidden md:block text-[#9bb5ad]">Cash <b className="text-white">${Math.round(state.finances.cash).toLocaleString()}</b></span>}
@@ -718,7 +720,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
               setSelectedTile({ x: building.x, y: building.y }); }}
             navigationTarget={navigationTarget} onNavigationComplete={navigationComplete} /> :
             <div className="h-full grid place-items-center text-[#b7d2c6]">Loading the park…</div>}
-          <div className="absolute top-4 left-4 flex items-center gap-2">
+          <div className="map-toolbar absolute top-4 left-4 flex items-center gap-2">
           <button type="button" onClick={() => controlsDialog.current?.showModal()}
             className=" rounded-lg border border-[#638374] bg-[#102321ed] px-3 py-2 text-sm font-bold text-[#e9f2d5] shadow-lg hover:bg-[#25443a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ffe374]">⌨ Controls</button>
           <button type="button" aria-label="Auto camera" aria-pressed={directorEnabled} title={directorEnabled ? 'Pause automatic camera. Dragging also takes over.' : 'Follow park highlights automatically'}
@@ -733,23 +735,25 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
             <button type="button" title="Follow guest" aria-label="Follow story guest" onClick={() => focusGuest(guestStory.guestId)} className="mt-3 rounded-full border border-[#789572] bg-[#334c38] px-3 py-1 text-sm">Follow ↗</button>
           </div>}
           <dialog ref={controlsDialog} aria-labelledby="controls-title" onClick={event => { if (event.target === controlsDialog.current) controlsDialog.current.close(); }}
-            className="w-[min(92vw,420px)] rounded-2xl border-2 border-[#ffe374] bg-[#1c2926] p-0 text-[#f5f2df] shadow-2xl backdrop:bg-[#071210b8]">
+            className="max-h-[90dvh] overflow-y-auto w-[min(92vw,420px)] rounded-2xl border-2 border-[#ffe374] bg-[#1c2926] p-0 text-[#f5f2df] shadow-2xl backdrop:bg-[#071210b8]">
             <div className="border-b border-[#496055] bg-[#283b31] px-5 py-4 flex items-center justify-between gap-4">
-              <h2 id="controls-title" className="text-xl font-black text-[#ffe374]">Park Controls</h2>
+              <h2 id="controls-title" className="text-xl font-black text-[#ffe374]">Controls</h2>
               <button type="button" onClick={() => controlsDialog.current?.close()} aria-label="Close controls" className="text-2xl leading-none hover:text-[#ffe374]">×</button>
             </div>
             <div className="space-y-3 px-5 py-5 text-sm">
-              <p className="flex justify-between gap-4"><span>Move around</span><b className="text-right">Drag with left or middle mouse</b></p>
-              <p className="flex justify-between gap-4"><span>Move up and down</span><b className="text-right">Mouse wheel</b></p>
-              <p className="flex justify-between gap-4"><span>Move left and right</span><b className="text-right">Shift + wheel</b></p>
-              <p className="flex justify-between gap-4"><span>Zoom</span><b className="text-right">Ctrl/Cmd + wheel</b></p>
+              <p className="flex justify-between gap-4 lg:hidden"><span>Move</span><b>Drag with one finger</b></p>
+              <p className="flex justify-between gap-4 lg:hidden"><span>Zoom</span><b>Pinch with two fingers</b></p>
+              <p className="hidden justify-between gap-4 lg:flex"><span>Move around</span><b className="text-right">Drag with left or middle mouse</b></p>
+              <p className="hidden justify-between gap-4 lg:flex"><span>Move up and down</span><b className="text-right">Mouse wheel</b></p>
+              <p className="hidden justify-between gap-4 lg:flex"><span>Move left and right</span><b className="text-right">Shift + wheel</b></p>
+              <p className="hidden justify-between gap-4 lg:flex"><span>Zoom</span><b className="text-right">Ctrl/Cmd + wheel</b></p>
               <p className="border-t border-[#496055] pt-3 text-[#bcd1c3]">Click a guest or attraction for details. Click a decision to follow its guest.</p>
               {adminMode && <button type="button" disabled={recording} onClick={() => void startRecording()} className="w-full rounded-full bg-[#d7fa81] px-4 py-3 font-bold text-[#18281b] disabled:opacity-50">{recording ? 'Recording…' : 'Record 60-second clip'}</button>}
             </div>
           </dialog>
           {specialEvent && <div role="status" className="pointer-events-none absolute top-16 right-4 max-w-[260px] rounded-xl border border-[#ffcf82] bg-[#402c27] px-4 py-2 text-sm font-bold text-[#fff0d1] shadow-xl">
             <span className="mr-1 text-xl">{specialEvent.icon}</span>{specialEvent.text}</div>}
-          {announcement && showAnnouncement && <div aria-live="polite" className="radio-pop absolute top-16 left-1/2 w-[min(88%,540px)] -translate-x-1/2 rounded-xl border-2 border-[#593126] bg-[#ffe374] px-5 py-3 text-center text-[#321d1e] shadow-[0_8px_0_#4e3028]">
+          {announcement && showAnnouncement && <div aria-live="polite" className="park-announcement radio-pop absolute top-16 left-1/2 w-[min(88%,540px)] -translate-x-1/2 rounded-xl border-2 border-[#593126] bg-[#ffe374] px-5 py-3 text-center text-[#321d1e] shadow-[0_8px_0_#4e3028]">
             <button type="button" onClick={() => setShowAnnouncement(false)} aria-label="Dismiss announcement" className="absolute right-2 top-1 rounded-full px-2 py-1 text-xl leading-none hover:bg-[#c9984c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#321d1e]">×</button>
             <div className="text-[11px] font-black tracking-[.2em]">📣 PARK RADIO{!announcement.budgetNotice && <> · BROADCAST #{announcement.id}</>}</div>
             <p className="mt-1 text-lg font-black leading-tight">{announcement.text}</p>
@@ -765,7 +769,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
             </div>}
             {selectedBuilding.type === 'food_hotdog' && (state.freeHotdogsUntilTick ?? 0) > state.tick && <p className="mt-2 font-bold text-[#ffe374]">🌭 Free hot dogs right now</p>}
           </div>}
-          <div className="absolute left-4 right-4 bottom-4 flex flex-wrap items-center gap-1.5 rounded-xl border border-[#506058] bg-[#101d1bf0] px-3 py-2 text-sm font-bold text-[#f3edce] shadow-xl sm:right-auto">
+          <div className="park-hud absolute left-4 right-4 bottom-4 flex flex-wrap items-center gap-1.5 rounded-xl border border-[#506058] bg-[#101d1bf0] px-3 py-2 text-sm font-bold text-[#f3edce] shadow-xl sm:right-auto">
             <button type="button" onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onClick={toggleSound} aria-label={soundPlaying ? 'Mute park sound' : 'Enable park sound'} aria-pressed={soundPlaying} title={soundPlaying ? 'Mute' : 'Enable sound'} className="rounded-full border border-[#617654] px-2 py-1 hover:bg-[#40533b]">{soundPlaying ? '🔊' : '🔇'}{soundBlocked && soundEnabled && <span className="ml-1 text-xs">Enable sound</span>}</button>
             {adminMode && recording && <button type="button" onClick={() => recorder.current?.stop()} className="rounded-full bg-[#a84437] px-3 py-1 text-white" title="Stop and download clip">● Stop recording</button>}
             {adminMode && recordedClip && <a href={recordedClip} download="jevassic-park.webm" className="rounded-full border border-[#d7fa81] px-3 py-1 text-[#d7fa81]">↓ Download clip</a>}
@@ -777,7 +781,13 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
             {(state.freeHotdogsUntilTick ?? 0) > state.tick && <span title="The hotdog giveaway is active" className="rounded-md bg-[#85482e] px-2 py-1">🌭 FREE</span>}
           </div>
         </section>
-        <aside className="flex h-[45dvh] min-h-0 w-full shrink-0 flex-col gap-3 overflow-hidden border-t border-[#254d49] bg-[#171f20] px-4 py-3 lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0 xl:w-[410px]">
+        <aside data-expanded={feedExpanded} className="decision-sheet flex min-h-0 w-full shrink-0 flex-col overflow-hidden border-t border-[#254d49] bg-[#171f20] lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0 xl:w-[410px]">
+          <button type="button" aria-expanded={feedExpanded} aria-controls="decision-sheet-content" aria-label={feedExpanded ? 'Collapse decisions' : 'Expand decisions'} onClick={() => setFeedExpanded(value => !value)} className="decision-sheet-toggle flex min-h-14 w-full shrink-0 items-center justify-between gap-3 px-4 py-2 text-left lg:hidden">
+            <span className="min-w-0"><span className="block text-sm font-bold text-[#f6edbd]">Decisions <span className="ml-1 rounded-full bg-[#d7fa81] px-2 py-0.5 text-xs text-[#16241b]">{decisionCount.toLocaleString()}</span></span>
+              {!feedExpanded && <span className="mt-1 block truncate text-xs text-[#b3c7b5]">{feed[0] ? `${feed[0].name ? `${feed[0].name}: ` : ''}${feed[0].action}` : adminMode ? 'Simulation controls' : 'Making plans…'}</span>}</span>
+            <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[#496654] text-xl text-[#d7fa81]">{feedExpanded ? '⌄' : '⌃'}</span>
+          </button>
+          <div id="decision-sheet-content" className="decision-sheet-content min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-3 lg:flex lg:pt-3">
           {adminMode && <><div className="flex shrink-0 gap-2">
             <button type="button" onClick={running ? pause : () => crowdDialog.current?.showModal()} className="flex-1 rounded-xl border border-[#efffb0] bg-[#d7fa81] px-4 py-3.5 text-base font-bold text-[#18281b] shadow-[0_3px_0_#6d8d43] transition hover:bg-[#e5ffab] active:translate-y-0.5 active:shadow-none">{running ? '⏸ Pause' : state.guests.length ? '▶ Resume' : '▶ Start simulation'}</button>
             {running && <button type="button" onClick={() => { pause(); crowdDialog.current?.showModal(); }} title="Options" aria-label="Options" className="rounded-xl border border-[#63816d] bg-[#294435] px-4 text-xl">⚙</button>}
@@ -838,10 +848,11 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
                     {isCurrentRadioReaction(entry.radio, announcement, showAnnouncement) && <span title={entry.radio?.text} className="mt-1.5 inline-flex rounded-full border border-[#c6a760] bg-[#4b4024] px-2 py-0.5 text-[11px] text-[#ffdfa2]">📣 Radio</span>}
                     {(!canFollow || !entry.guestId) && <span className="mt-1.5 inline-flex rounded-full border border-[#567264] bg-[#183129] px-2 py-0.5 text-[11px] text-[#cce4ce]">{entry.mode === 'broadcast' ? 'Broadcast' : entry.guestId ? 'Departed' : 'Manager'}</span>}</span>
                   {canFollow && <button type="button" onClick={() => entry.guestId && focusGuest(entry.guestId, 1.8)} title="Follow guest" aria-label="Follow guest"
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[#6a8a71] bg-[#31543b] text-lg text-[#e7ffc4] transition-colors hover:bg-[#507547] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ffe374]">↗</button>}
+                    className="grid h-11 w-11 lg:h-9 lg:w-9 shrink-0 place-items-center rounded-full border border-[#6a8a71] bg-[#31543b] text-lg text-[#e7ffc4] transition-colors hover:bg-[#507547] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ffe374]">↗</button>}
                 </article>;
               })}</div></div>
           <div className="shrink-0 border-t border-[#264541] pt-2 text-xs text-[#91aaa2]">Based on <a href="https://github.com/amilich/isometric-city" className="underline">IsoCoaster</a></div>
+          </div>
         </aside>
       </div>
     </main>

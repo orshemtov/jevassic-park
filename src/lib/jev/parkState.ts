@@ -33,5 +33,5 @@ export function summarizePark(state: GameState, freeHotdogs = (state.freeHotdogs
       queue: queues.get(`${tile.x},${tile.y}`) ?? 0 });
   }
   return { weather: state.weather.current, hour: state.hour, admission: state.settings.entranceFee,
-    activeGuests: state.guests.length, freeHotdogs, attractions: attractions.slice(0, 64) };
+    activeGuests: state.guests.length, freeHotdogs, attractions: attractions.slice(0, 128) };
 }

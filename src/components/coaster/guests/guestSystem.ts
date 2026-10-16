@@ -1,3 +1,4 @@
+import { guestVisualOffset } from '@/lib/jev/spectatorMotion';
 /**
  * Guest System for IsoCoaster
  * Handles guest spawning, AI, pathfinding, and rendering
@@ -217,6 +218,9 @@ export function drawGuest(
       }
     }
   }
+
+  const correction = guestVisualOffset(guest);
+  x += correction.x; y += correction.y;
 
   // Stable spacing keeps large crowds visible instead of stacking every guest on one pixel.
   x += Math.cos(guest.walkOffset * 5) * (TILE_WIDTH * 0.18);

@@ -247,13 +247,11 @@ export function useCoasterCloudSystem(
 
   // Spawn a new cloud
   const spawnCloud = useCallback((opts?: { position?: { x: number; y: number }; cloudType?: CloudType }) => {
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-
     const cloudType = opts?.cloudType ?? pickCloudType();
     const cfg = CLOUD_TYPE_CONFIG[cloudType];
 
-    const viewWidth = canvasWidth / (dpr * zoom);
-    const viewHeight = canvasHeight / (dpr * zoom);
+    const viewWidth = canvasWidth / zoom;
+    const viewHeight = canvasHeight / zoom;
     const viewLeft = -offset.x / zoom;
     const viewTop = -offset.y / zoom;
 
@@ -328,9 +326,8 @@ export function useCoasterCloudSystem(
     }
 
     // Update existing clouds
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-    const viewWidth = canvasWidth / (dpr * zoom);
-    const viewHeight = canvasHeight / (dpr * zoom);
+    const viewWidth = canvasWidth / zoom;
+    const viewHeight = canvasHeight / zoom;
     const viewLeft = -offset.x / zoom;
     const viewTop = -offset.y / zoom;
     const viewRight = viewLeft + viewWidth;
@@ -428,8 +425,8 @@ export function useCoasterCloudSystem(
     ctx.scale(dpr * zoom, dpr * zoom);
     ctx.translate(offset.x / zoom, offset.y / zoom);
 
-    const viewWidth = canvasWidth / (dpr * zoom);
-    const viewHeight = canvasHeight / (dpr * zoom);
+    const viewWidth = canvasWidth / zoom;
+    const viewHeight = canvasHeight / zoom;
     const viewLeft = -offset.x / zoom - CLOUD_WIDTH;
     const viewTop = -offset.y / zoom - CLOUD_WIDTH;
     const viewRight = viewWidth - offset.x / zoom + CLOUD_WIDTH;

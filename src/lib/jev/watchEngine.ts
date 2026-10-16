@@ -91,11 +91,12 @@ export function advanceWatchWorld(world: WatchWorld, park: GameState, now: numbe
 
 export function buildWatchBatch(world: WatchWorld, park: GameState, now = world.updatedAt): { actors: WatchActor[]; park: ParkState; announcement?: string } {
   const pending = new Set(world.announcement?.pending);
-  const broadcast = world.announcement?.pending.length && world.guests.some(guest => pending.has(guest.id) &&
+  const idleAfterRadio = world.guests.some(guest => !pending.has(guest.id) && isDecisionBoundary(guest));
+  const broadcast = !idleAfterRadio && world.announcement?.pending.length && world.guests.some(guest => pending.has(guest.id) &&
     ['walking', 'entering', 'queuing', 'leaving'].includes(guest.state)) ? world.announcement : undefined;
   const guests = world.guests.filter(guest => broadcast
     ? pending.has(guest.id) && ['walking', 'entering', 'queuing', 'leaving'].includes(guest.state)
-    : isDecisionBoundary(guest)).sort((a, b) => (world.lastDecided?.[a.id] ?? 0) - (world.lastDecided?.[b.id] ?? 0)).slice(0, 8);
+    : isDecisionBoundary(guest) && (!idleAfterRadio || !pending.has(guest.id))).sort((a, b) => (world.lastDecided?.[a.id] ?? 0) - (world.lastDecided?.[b.id] ?? 0)).slice(0, 8);
   const snapshot = broadcast?.park ?? summarizePark(currentPark(world, park), false);
   const actors = guests.map(guest => {
     const { hunger, thirst, energy, bathroom, nausea, happiness, cash, preferExcitement, preferIntensity, timeInPark } = guest;
@@ -120,7 +121,7 @@ export function applyWatchDecisions(world: WatchWorld, actors: WatchActor[], dec
     const guest = world.guests.find(guest => guest.id === decision.id);
     if (!action || !guest) continue;
     accepted.set(guest.id, action);
-    const broadcast = world.announcement?.pending.includes(guest.id) ? world.announcement : undefined;
+    const broadcast = actor?.actions.some(option => option.kind === 'continue') && world.announcement?.pending.includes(guest.id) ? world.announcement : undefined;
     const related = broadcast && announcedAttraction(broadcast.text, action.label);
     feed.push({ id: world.decisionCount + feed.length + 1, guestId: guest.id, name: guest.name,
       action: action.kind === 'continue' ? 'Kept their plan' : action.kind === 'leave' ? 'Headed for the exit' : action.kind === 'wait' ? 'Took a break' : `Chose ${action.label}`,
@@ -130,8 +131,10 @@ export function applyWatchDecisions(world: WatchWorld, actors: WatchActor[], dec
   return { ...world, guests: world.guests.map(guest => accepted.has(guest.id) ? applyWatchAction(guest, accepted.get(guest.id)!) : guest),
     lastDecided: Object.fromEntries(world.guests.map(guest => [guest.id, accepted.has(guest.id) ? now : world.lastDecided?.[guest.id] ?? 0])),
     feed: [...feed.reverse(), ...world.feed].filter(entry => entry.kind !== 'continue').slice(0, 50), mode, decisionCount: world.decisionCount + accepted.size,
+    ...(world.announcement?.pending.length && world.announcement.pending.every(id => feed.some(entry => entry.guestId === id && entry.broadcast))
+      ? { nextAnnouncementAt: world.watchedMs + announcementDelay() } : {}),
     ...(world.announcement ? { announcement: { ...world.announcement,
-      pending: world.announcement.pending.filter(id => !accepted.has(id)),
+      pending: world.announcement.pending.filter(id => !feed.some(entry => entry.guestId === id && entry.broadcast)),
       processed: world.announcement.processed + feed.filter(entry => entry.broadcast).length,
       responded: (world.announcement.responded ?? 0) + feed.filter(entry => entry.radio).length,
       changed: world.announcement.changed + feed.filter(entry => entry.broadcast && entry.kind !== 'continue').length,

@@ -622,3 +622,45 @@ html, body {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 }
+
+/* Keep the park visible while the mobile feed opens above the safe area. */
+@media (max-width: 1023px) {
+  .jevassic-shell .park-header {
+    height: auto;
+    min-height: 56px;
+    padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left));
+    gap: 8px;
+  }
+  .jevassic-shell .park-header h1 { font-size: 15px; white-space: nowrap; }
+  .jevassic-shell .park-header > div { gap: 6px; }
+  .jevassic-shell .park-header > div > span { white-space: nowrap; }
+  .jevassic-shell .park-header > div > span:last-child { padding: 5px 8px; font-size: 11px; }
+  .decision-sheet { height: calc(72px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); border-radius: 20px 20px 0 0; }
+  .decision-sheet[data-expanded="true"] { height: min(55dvh, 520px); }
+  .decision-sheet-content { display: none; }
+  .decision-sheet[data-expanded="true"] .decision-sheet-content { display: flex; }
+  .decision-sheet-toggle { touch-action: manipulation; }
+  .jevassic-shell .map-toolbar { top: 10px; left: max(10px, env(safe-area-inset-left)); gap: 6px; }
+  .jevassic-shell .map-toolbar button { min-height: 44px; padding: 8px 10px; font-size: 12px; }
+  .jevassic-shell .park-hud { left: 10px; right: auto; bottom: 10px; max-width: calc(100% - 20px); gap: 2px; padding: 4px 6px; font-size: 11px; }
+  .jevassic-shell .park-hud button { min-height: 44px; min-width: 44px; }
+  .jevassic-shell .park-hud span { padding-left: 5px; padding-right: 5px; }
+  .jevassic-shell .park-announcement { top: 64px; width: calc(100% - 20px); max-width: 540px; padding: 10px 36px 10px 12px; }
+  .jevassic-shell .park-announcement > div { font-size: 9px; letter-spacing: .1em; }
+  .jevassic-shell .park-announcement > p { font-size: 14px; }
+  .jevassic-shell .park-announcement > p:last-child { font-size: 10px; }
+  .jevassic-shell button[aria-label^="Close"],
+  .jevassic-shell button[aria-label^="Dismiss"] { min-width: 44px; min-height: 44px; }
+  .jevassic-shell dialog { max-height: calc(100dvh - 24px); }
+  .jevassic-shell dialog input, .jevassic-shell dialog textarea { font-size: 16px; }
+  .jevassic-shell dialog button { min-height: 44px; }
+}
+@media (max-width: 380px) {
+  .jevassic-shell .park-header h1 { font-size: 13px; }
+  .jevassic-shell .park-header > div { font-size: 10px; }
+}
+@media (max-width: 1023px) and (orientation: landscape) and (max-height: 500px) {
+  .decision-sheet { height: calc(56px + env(safe-area-inset-bottom)); }
+  .decision-sheet[data-expanded="true"] { height: 50dvh; }
+  .jevassic-shell .park-header { min-height: 44px; padding-top: 6px; padding-bottom: 6px; }
+}

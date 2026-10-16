@@ -236,6 +236,7 @@ export interface Guest {
   tileX: number;
   tileY: number;
   progress: number; // 0-1 progress to next tile
+  visualCorrection?: { x: number; y: number; at: number }; // Client-only snapshot easing
   direction: 'north' | 'east' | 'south' | 'west';
   
   // State

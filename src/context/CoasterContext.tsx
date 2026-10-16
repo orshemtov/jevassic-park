@@ -16,6 +16,7 @@ import { Building, BuildingType } from '@/games/coaster/types/buildings';
 import { chargeGuestForActivity, createGuest, updateGuest } from '@/components/coaster/guests';
 import { getGuestActions, isDecisionBoundary } from '@/lib/jev/decisions';
 import { perlinNoise } from '@/lib/simulation';
+import { reconcileSpectatorGuests } from '@/lib/jev/spectatorMotion';
 import {
   COASTER_AUTOSAVE_KEY,
   COASTER_SAVED_PARK_PREFIX,
@@ -3341,8 +3342,13 @@ export function CoasterProvider({
   }, []);
 
   const applySpectatorSnapshot = useCallback((snapshot: { guests?: Guest[]; tick?: number; hour: number; minute: number; weather: WeatherState }) => {
+    const alreadyWatching = spectatorRef.current;
     spectatorRef.current = true;
-    setState(prev => ({ ...prev, ...snapshot }));
+    setState(prev => ({ ...prev, ...snapshot,
+      // Render animation has its own continuous clock; server corrections must not rewind the crowd.
+      tick: alreadyWatching ? prev.tick : snapshot.tick ?? prev.tick,
+      guests: snapshot.guests ? reconcileSpectatorGuests(prev.guests, snapshot.guests, Date.now()) : prev.guests,
+    }));
   }, []);
 
   const setGuestTarget = useCallback((target: number, maxAdd = 20) => {
