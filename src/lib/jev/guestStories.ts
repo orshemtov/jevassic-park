@@ -1,7 +1,7 @@
 import type { Guest } from '@/games/coaster/types/economy';
 import type { GameState } from '@/games/coaster/types/game';
 
-export type GuestStory = { id: string; guestId: string; name: string; icon: string; text: string; at: number };
+export type GuestStory = { id: string; guestId: string; name: string; icon: string; text: string; at: number; steps?: string[] };
 
 /** Observed transitions only: these captions do not invent a guest's thoughts. */
 export function detectGuestStories(previous: Guest[], current: Guest[], now: number, grid?: GameState['grid']): GuestStory[] {
@@ -33,6 +33,11 @@ export function detectGuestStories(previous: Guest[], current: Guest[], now: num
       old.cash >= 10 && guest.cash < 10 && guest.cash < old.cash) {
       caption = { key: `shopping:${now}`, icon: '🎁', text: 'Souvenir secured. Wallet nearly empty.' };
     }
+    if (!caption && completedRide && ride && grid) {
+      const [x, y] = ride.split(',').map(Number);
+      const type = grid[y]?.[x]?.building.type;
+      if (type) caption = { key: `ride:${rides.length}`, icon: '🎢', text: 'Another ride conquered.' };
+    }
     if (caption) {
       stories.push({ id: `${guest.id}:${caption.key}`, guestId: guest.id, name: guest.name,
         icon: caption.icon, text: caption.text, at: now });
@@ -40,4 +45,13 @@ export function detectGuestStories(previous: Guest[], current: Guest[], now: num
     }
   }
   return stories;
+}
+
+export function connectGuestStory(story: GuestStory, history: Map<string, { at: number; steps: string[] }>): GuestStory {
+  for (const [id, previous] of history) if (story.at - previous.at > 600_000) history.delete(id);
+  const previous = history.get(story.guestId);
+  const steps = [...(previous?.steps ?? []), story.text].filter((step, index, all) => step !== all[index - 1]).slice(-3);
+  history.set(story.guestId, { at: story.at, steps });
+  if (history.size > 100) history.delete(history.keys().next().value!);
+  return { ...story, steps };
 }

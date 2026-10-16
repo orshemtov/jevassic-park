@@ -14,6 +14,7 @@ function validActor(actor: unknown): actor is Actor {
   const a = actor as Actor;
   if (typeof a.id !== 'string' || !/^[a-zA-Z0-9-]{1,50}$/.test(a.id) || !a.guest ||
       !Array.isArray(a.actions) || a.actions.length < 1 || a.actions.length > 10) return false;
+  if (a.codeChoice !== undefined && (typeof a.codeChoice !== 'string' || !a.actions.some(action => action?.id === a.codeChoice))) return false;
   const g = a.guest;
   if (!validNumber(g.hunger) || !validNumber(g.thirst) || !validNumber(g.energy) ||
       !validNumber(g.bathroom) || !validNumber(g.nausea) || !validNumber(g.happiness) ||
@@ -22,6 +23,10 @@ function validActor(actor: unknown): actor is Actor {
   if (g.timeInPark !== undefined && !validNumber(g.timeInPark, 10000000)) return false;
   if (g.ridesRidden !== undefined && (!Array.isArray(g.ridesRidden) || g.ridesRidden.length > 32 ||
       !g.ridesRidden.every(id => typeof id === 'string' && /^\d{1,3},\d{1,3}$/.test(id)))) return false;
+  if (g.personality !== undefined && (typeof g.personality !== 'string' || g.personality.length > 40)) return false;
+  if (g.groupId !== undefined && (typeof g.groupId !== 'string' || g.groupId.length > 80)) return false;
+  if (g.destination !== undefined && (typeof g.destination !== 'string' || !/^\d{1,3},\d{1,3}$/.test(g.destination))) return false;
+  if (g.friends !== undefined && (!Array.isArray(g.friends) || g.friends.length > 3 || !g.friends.every(name => typeof name === 'string' && name.length <= 60))) return false;
   const seen = new Set<string>();
   return a.actions.every(action => {
     if (!action || typeof action.id !== 'string' || !/^(ride|food|drink|shop|restroom):\d{1,3},\d{1,3}$|^(wait|leave|continue)$/.test(action.id) ||
@@ -55,7 +60,7 @@ export async function POST(request: NextRequest) {
       !validNumber(body.park.hour, 24) || !validNumber(body.park.admission, 1000) ||
       !Number.isInteger(body.park.activeGuests) || !validNumber(body.park.activeGuests, 10000) ||
       typeof body.park.freeHotdogs !== 'boolean' || !Array.isArray(body.park.attractions) ||
-      body.park.attractions.length > 64 || !body.park.attractions.every(item => item &&
+      body.park.attractions.length > 128 || !body.park.attractions.every(item => item &&
         typeof item.id === 'string' && /^(ride|food|drink|shop|restroom):\d{1,3},\d{1,3}$/.test(item.id) &&
         typeof item.label === 'string' && /^[a-zA-Z0-9 _-]{1,80}$/.test(item.label) &&
         ['ride', 'food', 'drink', 'shop', 'restroom'].includes(item.kind) && item.id.split(':')[0] === item.kind &&

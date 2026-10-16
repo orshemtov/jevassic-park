@@ -16,11 +16,12 @@ const getPark = () => park ??= JSON.parse(readFileSync(`${process.cwd()}/public/
 function response(world: WatchWorld) {
   return NextResponse.json({ guests: world.guests, tick: world.tick, population: world.population, ...watchEnvironment(world, getPark()),
     ...(world.spectacle ? { spectacle: world.spectacle } : {}),
+    incidents: world.incidents ?? [], rhythm: world.rhythm,
     mode: world.mode, decisionCount: world.decisionCount,
     budget: { exhausted: Boolean(world.budgetExhausted), resetsAt: new Date(Date.parse(`${world.day}T00:00:00Z`) + 86_400_000).toISOString() },
     feed: world.feed.map(entry => ({ ...entry, time: new Date(entry.time).toLocaleTimeString('en-GB') })),
     ...(world.announcement ? { announcement: { id: world.announcement.id, text: world.announcement.text, at: world.announcement.at,
-      total: world.announcement.total, processed: world.announcement.processed, changed: world.announcement.changed, stayed: world.announcement.stayed, responded: world.announcement.responded ?? 0,
+      total: world.announcement.total, processed: world.announcement.processed, changed: world.announcement.changed, stayed: world.announcement.stayed, responded: world.announcement.responded ?? 0, responders: world.announcement.responders ?? [],
       status: world.announcement.pending.length ? 'deciding' : 'done' } } : {}),
   }, { headers: { 'Cache-Control': 'public, max-age=0, s-maxage=1', 'X-Content-Type-Options': 'nosniff' } });
 }

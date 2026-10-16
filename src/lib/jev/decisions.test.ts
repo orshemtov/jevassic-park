@@ -189,3 +189,26 @@ it('lets interested healthy code guests attend a parade while others keep their 
   expect(choices).toEqual(new Set(['continue', 'ride:11,1']));
   expect(chooseOfflineAnnouncement({ ...guest, energy: 0 }, actions, 'The parade is starting.')).toBe('continue');
 });
+
+it('reports real queues and offers a quieter destination when the nearest ride is crowded', () => {
+  const park = JSON.parse(readFileSync('public/parks/showcase.json', 'utf8'));
+  const tile = park.grid.flat().find((tile: { path: boolean }) => tile.path);
+  const guest = { ...createGuest(tile.x, tile.y, park.gridSize), cash: 100 };
+  const initial = getGuestActions(park.grid, guest).find(action => action.kind === 'ride')!;
+  const crowd = Array.from({ length: 20 }, () => ({ ...createGuest(tile.x, tile.y, park.gridSize), state: 'queuing' as const, queueRideId: initial.buildingId!, targetBuildingId: initial.buildingId! }));
+  const actions = getGuestActions(park.grid, guest, false, '', crowd);
+  expect(actions.find(action => action.kind === 'ride')?.id).not.toBe(initial.id);
+  const radio = getGuestActions(park.grid, guest, false, 'The carousel is boarding.', crowd);
+  if (radio[0]?.buildingId === initial.buildingId) expect(radio[0].queue).toBe(20);
+});
+
+it('keeps a previously offered destination valid when crowd rankings change', () => {
+  const park = JSON.parse(readFileSync('public/parks/showcase.json', 'utf8'));
+  const tile = park.grid.flat().find((tile: { path: boolean }) => tile.path);
+  const guest = { ...createGuest(tile.x, tile.y, park.gridSize), cash: 100 };
+  const all = getGuestActions(park.grid, guest, false, '', [], true);
+  expect(all.length).toBeGreaterThan(10);
+  for (const option of getGuestActions(park.grid, guest, false, '', park.guests)) {
+    expect(all.some(action => action.id === option.id)).toBe(true);
+  }
+});

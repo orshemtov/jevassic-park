@@ -13,6 +13,13 @@ it('prioritizes active spectacles and ignores expired ones', () => {
 it('follows a recent observed story without repeating the same shot', () => {
   const story = { id: 'third-ride', guestId: guest.id, name: guest.name, icon: '🎢', text: 'Three rides.', at: 1000 };
   expect(chooseDirectorShot(park, undefined, story, '', 2000)).toMatchObject({ key: story.id, guestId: guest.id });
-  expect(chooseDirectorShot(park, undefined, story, story.id, 2000)?.key).not.toBe(story.id);
+  expect(chooseDirectorShot(park, undefined, story, story.id, 2000)).toBeNull();
   expect(chooseDirectorShot({ ...park, guests: [] }, undefined, story, '', 2000)).toBeNull();
+});
+
+it('avoids recent guests and holds a developing story for thirty seconds', () => {
+  const story = { id: 'developing', guestId: guest.id, name: guest.name, icon: '🎢', text: 'Still going.', at: 1000 };
+  expect(chooseDirectorShot(park, undefined, story, story.id, 25_000)).toBeNull();
+  expect(chooseDirectorShot(park, undefined, null, 'elsewhere', 25_000, [`guest:${guest.id}`])).toBeNull();
+  expect(chooseDirectorShot(park, undefined, story, story.id, 35_000)?.key).toBe(`guest:${guest.id}`);
 });

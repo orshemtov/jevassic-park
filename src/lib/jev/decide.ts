@@ -4,9 +4,9 @@ import { chooseOffline, chooseOfflineAnnouncement, type ActionKind } from './dec
 import type { ParkState } from './parkState';
 
 export type Actor = {
-  id: string;
+  id: string; codeChoice?: string;
   guest: { hunger: number; thirst: number; energy: number; bathroom: number; nausea: number;
-    happiness: number; cash: number; preferExcitement: number; preferIntensity: number; activity?: string; timeInPark?: number; ridesRidden?: string[] };
+    happiness: number; cash: number; preferExcitement: number; preferIntensity: number; personality?: string; friends?: string[]; destination?: string; groupId?: string; activity?: string; timeInPark?: number; ridesRidden?: string[] };
   actions: { id: string; kind: ActionKind; label: string; price: number; distance: number; queue: number }[];
 };
 export type Manager = { actions: { id: string; label: string }[] };
@@ -18,7 +18,7 @@ export async function decide(body: { park: ParkState; actors: Actor[]; manager?:
     return NextResponse.json({ mode: 'offline', decisions: actors.map(actor => ({
       id: actor.id, action: body.announcement
         ? chooseOfflineAnnouncement(actor.guest, actor.actions, body.announcement)
-        : chooseOffline({ ...actor.guest, id: actor.id }, actor.actions),
+        : actor.codeChoice && actor.actions.some(action => action.id === actor.codeChoice) ? actor.codeChoice : chooseOffline({ ...actor.guest, id: actor.id }, actor.actions),
     })), manager: manager ? (body.park.admission !== 20 && manager.actions.some(action => action.id === 'fee20')
       ? 'fee20' : 'keep') : undefined,
       usage: { inputTokens: 0 } });
@@ -31,7 +31,7 @@ export async function decide(body: { park: ParkState; actors: Actor[]; manager?:
   actors.forEach((actor, index) => {
     questions[`g${index}`] = {
       type: 'choice',
-      instructions: `${body.announcement ? `The park-wide announcement is ${JSON.stringify(body.announcement)}. Decide whether to keep the current plan or react to it. ` : ''}Choose this park guest's next action. Needs, activity, and cash: ${JSON.stringify(actor.guest)}. Hunger, thirst, bathroom, and nausea run from 0 (satisfied) to 100 (urgent); energy 100 means rested. Hunger/thirst below 55 and bathroom below 65 are not urgent. Favor satisfying urgent needs, affordability, and variety. Comfortable guests can enjoy attractions. An announcement is an optional opportunity, not an order. Use a restroom when needed and rest to recover energy. Avoid repeating visited rides. Consider leaving only after a reasonable visit or when unable to afford useful activities.`,
+      instructions: `${body.announcement ? `The park-wide announcement is ${JSON.stringify(body.announcement)}. Decide whether to keep the current plan or react to it. ` : ''}Choose this park guest's next action. Needs, activity, and cash: ${JSON.stringify(actor.guest)}. Hunger, thirst, bathroom, and nausea run from 0 (satisfied) to 100 (urgent); energy 100 means rested. Hunger/thirst below 55 and bathroom below 65 are not urgent. Favor satisfying urgent needs, affordability, and variety. Comfortable guests can enjoy attractions. Honor personality: thrill seekers prefer exciting rides, cautious guests gentle rides, foodies snacks, collectors souvenirs, sightseers views, bargain hunters free or inexpensive options. Friends may choose the same legal destination or briefly wait to regroup, but urgent needs come first. Consider actual queues, distance, weather and time of day. An announcement is an optional opportunity, not an order. Use a restroom when needed and rest to recover energy. Avoid repeating visited rides. Consider leaving only after a reasonable visit or when unable to afford useful activities.`,
       criteria: Object.fromEntries(actor.actions.map(action => [action.id,
         `${action.label}; ${action.kind}; cost $${action.price}; ${action.distance} path tiles away; queue ${action.queue}`])),
     };

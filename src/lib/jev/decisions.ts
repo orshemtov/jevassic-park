@@ -1,4 +1,5 @@
 import { DEFAULT_PRICES, type Guest } from '@/games/coaster/types/economy';
+import { attractionActivity } from './attractionActivity';
 import { findSpectacleVenue, spectacleForAnnouncement } from './spectacles';
 import { TOOL_INFO, type Tile, type Tool } from '@/games/coaster/types/game';
 
@@ -29,7 +30,7 @@ export function isDecisionBoundary(guest: Guest): boolean {
     !guest.queueRideId && guest.decisionCooldown <= 0;
 }
 
-export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = false, announcement = ''): GuestAction[] {
+export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = false, announcement = '', guests: Guest[] = [], allReachable = false): GuestAction[] {
   const size = grid.length;
   const start = key(guest.tileX, guest.tileY);
   if (!grid[guest.tileY]?.[guest.tileX]?.path && !grid[guest.tileY]?.[guest.tileX]?.queue) {
@@ -65,6 +66,7 @@ export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = fals
 
   const show = spectacleForAnnouncement(announcement);
   const venue = show ? findSpectacleVenue(grid, show) : undefined;
+  const activity = attractionActivity(guests);
   const candidates: GuestAction[] = [];
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const type = grid[y][x].building?.type ?? '';
@@ -88,21 +90,30 @@ export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = fals
       kind === 'food' ? DEFAULT_PRICES.foodItem : kind === 'shop' ? DEFAULT_PRICES.shopItem : 0;
     if (guest.cash < price) continue;
     candidates.push({ id: `${kind}:${x},${y}`, kind, label: scenicShow ? show === 'fountain' ? 'Fountain show' : 'Fireworks' : attractionName(type), price,
-      distance: reachable.length, queue: 0, path: reachable, buildingId: key(x, y) });
+      distance: reachable.length, queue: activity.get(key(x, y))?.queued ?? 0, path: reachable, buildingId: key(x, y) });
   }
 
-  candidates.sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id));
-  const picked: GuestAction[] = [];
+  const crowdCost = (action: GuestAction) => {
+    const use = action.buildingId ? activity.get(action.buildingId) : undefined;
+    return action.distance + action.queue * 4 + (use?.heading ?? 0) * 2 + (use?.riding ?? 0);
+  };
+  candidates.sort((a, b) => crowdCost(a) - crowdCost(b) || a.id.localeCompare(b.id));
+  // Acceptance validates reachability, not the changing shortlist's crowd ranking.
+  const picked: GuestAction[] = allReachable ? [...candidates] : [];
   const promoted = candidates.find(candidate => announcedAttraction(announcement, candidate.label) &&
     (!show || candidate.buildingId === `${venue?.x},${venue?.y}`));
   // Radio offers a specific detour; unrelated needs stay in the normal decision loop.
-  if (announcement) return promoted ? [promoted] : [];
+  if (announcement) return allReachable ? candidates.filter(candidate => announcedAttraction(announcement, candidate.label) &&
+    (!show || candidate.buildingId === `${venue?.x},${venue?.y}`)) : promoted ? [promoted] : [];
   for (const kind of ['ride', 'food', 'drink', 'shop', 'restroom'] as const) {
     const first = kind === 'food' && freeHotdogs
       ? candidates.find(candidate => candidate.kind === 'food' && candidate.price === 0) ?? candidates.find(candidate => candidate.kind === kind)
       : candidates.find(candidate => candidate.kind === kind);
     if (first && !picked.some(item => item.id === first.id)) picked.push(first);
   }
+  const friendDestination = guest.groupId ? guests.find(other => other.id !== guest.id && other.groupId === guest.groupId && other.targetBuildingId)?.targetBuildingId : undefined;
+  const friendOption = candidates.find(candidate => candidate.buildingId === friendDestination);
+  if (friendOption && !picked.some(item => item.id === friendOption.id)) picked.push(friendOption);
   for (const candidate of [...candidates.filter(item => item.kind === 'ride'), ...candidates]) {
     if (picked.length >= 7) break;
     if (!picked.some(item => item.id === candidate.id)) picked.push(candidate);
@@ -118,7 +129,7 @@ export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = fals
 type ChoosingGuest = Pick<Guest, 'hunger' | 'thirst' | 'energy' | 'happiness' | 'cash' | 'preferExcitement'> &
   Partial<Pick<Guest, 'id' | 'bathroom' | 'nausea' | 'timeInPark' | 'ridesRidden'>>;
 
-export function chooseOffline(guest: ChoosingGuest, actions: Pick<GuestAction, 'id' | 'kind' | 'distance'>[]): string {
+export function chooseOffline(guest: ChoosingGuest, actions: (Pick<GuestAction, 'id' | 'kind' | 'distance'> & Partial<Pick<GuestAction, 'queue'>>)[]): string {
   const visited = guest.timeInPark ?? 0;
   const wanted = (guest.happiness < 15 && visited > 2400) || (guest.cash < 2 && visited > 6000) ? 'leave' :
     (guest.bathroom ?? 0) > 65 ? 'restroom' : guest.hunger > 55 ? 'food' : guest.thirst > 55 ? 'drink' :
@@ -129,7 +140,7 @@ export function chooseOffline(guest: ChoosingGuest, actions: Pick<GuestAction, '
       let hash = 0;
       for (const character of `${seed}:${guest.preferExcitement}:${action.id}`) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
       const repeated = guest.ridesRidden?.includes(action.id.split(':')[1]) ? 25 : 0;
-      return action.distance * .2 + hash % 100 / 10 + repeated;
+      return action.distance * .2 + (action.queue ?? 0) * 2 + hash % 100 / 10 + repeated;
     };
     const rides = actions.filter(action => action.kind === 'ride').sort((a, b) => score(a) - score(b));
     if (rides[0]) return rides[0].id;

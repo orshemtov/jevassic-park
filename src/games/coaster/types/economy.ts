@@ -230,12 +230,16 @@ export const GUEST_THOUGHT_TEXT: Record<GuestThought, string> = {
 
 export interface Guest {
   id: string;
+  personality?: 'thrill-seeker' | 'foodie' | 'sightseer' | 'collector' | 'cautious' | 'bargain-hunter';
+  groupId?: string;
+  recurringCharacter?: 'banana-bob' | 'auntie-chaos' | 'professor-queue';
   name: string;
   
   // Position
   tileX: number;
   tileY: number;
   progress: number; // 0-1 progress to next tile
+  photoPauseTicks?: number;
   visualCorrection?: { x: number; y: number; at: number }; // Client-only snapshot easing
   direction: 'north' | 'east' | 'south' | 'west';
   

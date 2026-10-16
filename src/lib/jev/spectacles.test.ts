@@ -21,7 +21,7 @@ describe('park spectacles', () => {
   for (const kind of ['parade', 'fireworks', 'fountain'] as const) it(`offers a reachable ${kind} viewing destination`, () => {
     const spectacle = createParkSpectacle(park, kind, 1000)!;
     expect(spectacle.startedAt).toBe(1000);
-    expect(spectacle.durationMs).toBe(kind === 'fireworks' ? 120000 : 240000);
+    expect(spectacle.durationMs).toBe(kind === 'fountain' ? 60000 : 90000);
     const text = spectacleAnnouncement(kind);
     expect(spectacleForAnnouncement(text)).toBe(kind);
     const point = spectacle.route[0];

@@ -13,7 +13,10 @@
 - **Live decisions** with guest names. Follow a choice to follow its guest.
 - **Live spectacles:** moving parades, fountain shows and nighttime fireworks. Guests choose whether to join.
 - **Auto camera:** smooth highlight shots; pan, zoom or select a guest to take over.
-- **Guest stories:** observed milestones, repeat rides and snack rescues.
+- **Guest stories:** linked ride, recovery and snack moments.
+- **Personalities and friends:** six archetypes, matching outfits, shared plans and rare recurring characters.
+- **Park rhythm:** lunch rush, afternoon parade, sunset fountains and castle fireworks.
+- **Little mishaps:** lost hats, escaping balloons, mascot encounters, photo stops and soaked riders.
 - Waving crowds, balloons, cheers and splash reactions. Reduced motion supported.
 - Animated rides, water, weather, day and night.
 - **Music:** five original fantasy tracks, shuffled, with parade, snack and ride cues.
@@ -76,7 +79,7 @@ npm test
 npm run build
 ```
 
-Tests mock Jev calls and spend no credits. They cover budgets, concurrent requests, simulation behavior and attraction reachability.
+Tests mock Jev calls and spend no credits. Coverage includes budgets, concurrency, reachable attractions and a ten-minute simulation for movement, completed rides and decision starvation.
 
 ## Deploy to Vercel
 

@@ -46,5 +46,5 @@ export function createParkSpectacle(park: Pick<GameState, 'grid'>, kind: ParkSpe
     }
     route.push(...route.slice(0, -1).reverse());
   }
-  return { kind, startedAt: now, durationMs: kind === 'fireworks' ? 120_000 : 240_000, center, route };
+  return { kind, startedAt: now, durationMs: kind === 'fountain' ? 60_000 : 90_000, center, route };
 }

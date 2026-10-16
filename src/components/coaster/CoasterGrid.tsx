@@ -22,6 +22,8 @@ import type { ParkSpectacle } from '@/lib/jev/spectacles';
 import { drawParadeTile, drawSpectacleSky, drawGuestCelebration } from './spectacleDrawing';
 import { drawParkWeather } from './weatherDrawing';
 import { guestVisualOffset } from '@/lib/jev/spectatorMotion';
+import type { ParkIncident } from '@/lib/jev/parkEvents';
+import { detailedGuest, drawDistantGuest, drawRadioResponse, drawGuestIncident } from './guestEffects';
 
 // Track tools that support drag-to-draw
 const TRACK_DRAG_TOOLS: Tool[] = [
@@ -2628,6 +2630,8 @@ interface CoasterGridProps {
   onFollowStop?: () => void;
   onManualCameraMove?: () => void;
   spectacle?: ParkSpectacle;
+  incidents?: ParkIncident[];
+  broadcastResponders?: string[];
   selectedTile: { x: number; y: number } | null;
   ambientVisitors?: number;
   reactionMarks?: { id: string; icon: string; at: number }[];
@@ -2649,6 +2653,8 @@ export function CoasterGrid({
   onFollowStop,
   onManualCameraMove,
   spectacle,
+  incidents = [],
+  broadcastResponders = [],
   selectedTile,
   ambientVisitors = 0,
   reactionMarks = [],
@@ -2676,6 +2682,8 @@ export function CoasterGrid({
       lastParkEventAt.current = now;
     }
   }, [state.guests]);
+  const radioResponders = useMemo(() => new Set(broadcastResponders), [broadcastResponders]);
+  const incidentsByGuest = useMemo(() => new Map(incidents.map(incident => [incident.guestId, incident])), [incidents]);
   const reactionsByGuest = useMemo(() => new Map(reactionMarks.map(mark => [mark.id, mark])), [reactionMarks]);
   
   // Create a lookup map from coaster ID to colors and category for track rendering
@@ -3003,6 +3011,8 @@ export function CoasterGrid({
     const viewRight = canvasSize.width / zoom - offset.x / zoom + CULL_MARGIN_X;
     const viewBottom = canvasSize.height / zoom - offset.y / zoom + CULL_MARGIN_BOTTOM;
     
+    const frameNow = Date.now();
+    const guestPoints = new Map<string, {x:number;y:number}>();
     const guestsByTile = new Map<string, typeof state.guests>();
     const activityByBuilding = attractionActivity(state.guests);
     const rideOccupancy = new Map<string, number>();
@@ -3013,6 +3023,8 @@ export function CoasterGrid({
       }
       // Snapshot smoothing can leave the visible guest a tile away from its logical position.
       const point = guestScreenPoint(guest);
+      if (point.x < viewLeft || point.x > viewRight || point.y < viewTop || point.y > viewBottom) return;
+      guestPoints.set(guest.id, point);
       const { gridX, gridY } = screenToGrid(point.x, point.y, 0, 0);
       const key = `${Math.max(0, Math.min(gridSize - 1, gridX))},${Math.max(0, Math.min(gridSize - 1, gridY))}`;
       const existing = guestsByTile.get(key);
@@ -3332,16 +3344,25 @@ const tile = grid[y][x];
           guests.forEach(guest => {
             const venue = (guest.queueRideId ?? guest.targetBuildingId)?.split(',').map(Number);
             const venueType = venue ? grid[venue[1]]?.[venue[0]]?.building?.type ?? '' : '';
-            const audience = guest.state === 'riding' && /show_parade|fountain|castle/.test(venueType);
+            const audience = guest.state === 'riding' && /show_parade|fountain|castle|ride_themed_facade/.test(venueType);
             const visibleGuest = audience ? { ...guest, state: 'watching' as const } : guest;
-            drawGuest(ctx, visibleGuest, tick);
-            drawGuestCelebration(ctx, visibleGuest, guestScreenPoint(visibleGuest), spectacle, Date.now(), reducedMotionRef.current);
+            const point = guestPoints.get(guest.id)!;
+            const latestIncident = incidentsByGuest.get(guest.id);
+            const incident = latestIncident && frameNow >= latestIncident.at && frameNow < latestIncident.expiresAt ? latestIncident : undefined;
+            const responding = radioResponders.has(guest.id) && visibleGuest.state !== 'riding' && visibleGuest.state !== 'leaving';
+            const fullDetail = detailedGuest(zoom, isMobile, guest.id === followGuestId || !!incident || responding);
+            if (responding) drawRadioResponse(ctx, point, frameNow, reducedMotionRef.current);
+            if (fullDetail) {
+              drawGuest(ctx, visibleGuest, tick);
+              drawGuestCelebration(ctx, visibleGuest, point, spectacle, frameNow, reducedMotionRef.current);
+            } else drawDistantGuest(ctx, visibleGuest, point);
+            if (incident && visibleGuest.state !== 'riding') drawGuestIncident(ctx, incident, point, frameNow, reducedMotionRef.current);
             const mark = reactionsByGuest.get(guest.id);
             if (mark && Date.now() - mark.at < 5000) {
-              const next = gridToScreen(guest.targetTileX, guest.targetTileY, 0, 0);
+              const next = point;
               ctx.font = '18px system-ui';
               ctx.textAlign = 'center';
-              ctx.fillText(mark.icon, next.screenX + TILE_WIDTH / 2, next.screenY - 13);
+              ctx.fillText(mark.icon, next.x, next.y - 24);
             }
           });
         }
@@ -3444,7 +3465,7 @@ const tile = grid[y][x];
       ctx.scale(1 / zoom, 1 / zoom);
       ctx.font = 'bold 11px system-ui';
       const label = activity ? Object.entries(activity).filter(([kind, count]) => count > 0 && kind !== 'heading')
-        .map(([kind, count]) => `${count} ${kind === 'riding' && /show_parade|fountain|castle/.test(box.building.type) ? 'Watching' : activityLabels[kind as keyof typeof activity]}`).join(' · ') : '';
+        .map(([kind, count]) => `${count} ${kind === 'riding' && /show_parade|fountain|castle|ride_themed_facade/.test(box.building.type) ? 'Watching' : activityLabels[kind as keyof typeof activity]}`).join(' · ') : '';
       if (label) {
         const width = ctx.measureText(label).width + 14;
         ctx.fillStyle = '#213b2eed';
@@ -3457,7 +3478,7 @@ const tile = grid[y][x];
       }
       if (event) {
         const elapsed = Date.now() - event.at;
-        const text = /show_parade|fountain|castle/.test(box.building.type) && event.kind === 'riding' ? '✨ Finding a good view!' : activityEventText(event);
+        const text = /show_parade|fountain|castle|ride_themed_facade/.test(box.building.type) && event.kind === 'riding' ? '✨ Finding a good view!' : activityEventText(event);
         const width = ctx.measureText(text).width + 24;
         const y = -44 - Math.min(10, elapsed / 400);
         ctx.globalAlpha = Math.min(1, (7000 - elapsed) / 1500, elapsed / 200);
@@ -3502,7 +3523,7 @@ const tile = grid[y][x];
     }
     
     ctx.restore();
-  }, [grid, gridSize, offset, zoom, canvasSize, tick, selectedTile, hoveredTile, selectedTool, spriteSheets, waterImage, state, trackDragPreviewTiles, isTrackDragging, coasterInfoMap, incompleteTrackEnds, reactionsByGuest, ambientCrowd, buildingSpriteHitboxes, spectacle]);
+  }, [grid, gridSize, offset, zoom, canvasSize, tick, selectedTile, hoveredTile, selectedTool, spriteSheets, waterImage, state, trackDragPreviewTiles, isTrackDragging, coasterInfoMap, incompleteTrackEnds, reactionsByGuest, ambientCrowd, buildingSpriteHitboxes, spectacle, incidentsByGuest, radioResponders, followGuestId, isMobile]);
   
   // Lighting canvas sizing
   useEffect(() => {
@@ -3555,7 +3576,7 @@ const tile = grid[y][x];
       // Clear and draw clouds
       ctx.clearRect(0, 0, cloudCanvas.width, cloudCanvas.height);
       drawClouds(ctx);
-      drawParkWeather(ctx, state.weather.current, canvasSize.width, canvasSize.height, currentTime / 1000, dpr, reducedMotionRef.current);
+      drawParkWeather(ctx, state.weather.current, canvasSize.width, canvasSize.height, currentTime / 1000, dpr, reducedMotionRef.current, isMobile);
       
       animationId = requestAnimationFrame(animate);
     };
@@ -3565,7 +3586,7 @@ const tile = grid[y][x];
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [canvasSize, updateClouds, drawClouds, state.speed, state.weather]);
+  }, [canvasSize, updateClouds, drawClouds, state.speed, state.weather, isMobile]);
   
   // Helper to calculate tiles in a line from start to end (with direction locking)
   const calculateLineTiles = useCallback((

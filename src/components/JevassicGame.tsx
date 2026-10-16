@@ -10,21 +10,24 @@ import { summarizePark, type ParkState } from '@/lib/jev/parkState';
 import type { GameState } from '@/games/coaster/types/game';
 import type { Guest } from '@/games/coaster/types/economy';
 import { announcementDelay, nextParkAnnouncement, isCurrentRadioReaction, type RadioReaction } from '@/lib/jev/announcements';
+import { announcementImpact } from '@/lib/jev/announcementImpact';
 import { attractionActivity, activityLabels, emptyActivity } from '@/lib/jev/attractionActivity';
 import type { ParkMusicState } from '@/lib/jev/parkMusic';
 import { createParkSpectacle, spectacleForAnnouncement, type ParkSpectacle } from '@/lib/jev/spectacles';
-import { detectGuestStories, type GuestStory } from '@/lib/jev/guestStories';
-import { chooseDirectorShot } from '@/lib/jev/cameraDirector';
+import { detectGuestStories, connectGuestStory, type GuestStory } from '@/lib/jev/guestStories';
+import { chooseDirectorShot, DIRECTOR_HOLD_MS } from '@/lib/jev/cameraDirector';
+import { guestPersonality, guestSocialContext, companionAction, personalityAction } from '@/lib/jev/guestPersonality';
+import { parkRhythm, guestIncident, rideIncident, type ParkIncident } from '@/lib/jev/parkEvents';
 import { connectParkAudio } from '@/lib/jev/parkAudio';
 import { recordPark, type RecordingSnapshot } from '@/lib/recordPark';
 
 const PRESETS = [10, 100, 1000, 5000, 10000];
 type Decision = { id: string; action: string; probability?: number };
 type DecisionResponse = { mode: 'live' | 'offline'; decisions: Decision[]; manager?: string; error?: string; usage?: { inputTokens?: number | null } };
-type FeedEntry = { id?: number; action: string; mode: string; time: string; guestId?: string; name?: string; kind?: ActionKind; broadcast?: boolean; radio?: RadioReaction };
+type FeedEntry = { id?: number; action: string; mode: string; time: string; guestId?: string; name?: string; kind?: ActionKind; probability?: number; broadcast?: boolean; radio?: RadioReaction };
 type ReactionMark = { id: string; icon: string; at: number };
 type Announcement = { id: number; text: string; total: number; processed: number;
-  changed: number; stayed: number; responded?: number; status: 'deciding' | 'done'; park: ParkState; budgetNotice?: boolean };
+  changed: number; stayed: number; responded?: number; responders?: string[]; status: 'deciding' | 'done'; park: ParkState; budgetNotice?: boolean };
 const ANNOUNCEMENTS = [
   'The hotdog stand is giving away free hot dogs!',
   'The parade is starting.',
@@ -38,8 +41,8 @@ const weatherIcon: Record<string, string> = { sunny: '☀️', partly_cloudy: '�
 
 type GameOptions = { adminMode: boolean; decisionIntervalMs: number; spectatorPopulation: number };
 type WatchSnapshot = Pick<GameState, 'hour' | 'minute' | 'weather'> & { guests: Guest[]; tick: number; feed: FeedEntry[]; mode: 'live' | 'offline';
-  decisionCount: number; population: number; spectacle?: ParkSpectacle; budget?: { exhausted: boolean; resetsAt: string };
-  announcement?: { id: number; text: string; at: number; total: number; processed: number; changed: number; stayed: number; responded?: number; status: 'deciding' | 'done' } };
+  decisionCount: number; population: number; spectacle?: ParkSpectacle; incidents?: ParkIncident[]; budget?: { exhausted: boolean; resetsAt: string };
+  announcement?: { id: number; text: string; at: number; total: number; processed: number; changed: number; stayed: number; responded?: number; responders?: string[]; status: 'deciding' | 'done' } };
 
 function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, spectatorPopulation }: GameOptions) {
   const { state, latestStateRef, isStateReady, setSpeed, setGuestTarget, applyGuestChoice,
@@ -80,6 +83,10 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
   const spectacleRef = useRef<ParkSpectacle | undefined>(undefined);
   const [guestStory, setGuestStory] = useState<GuestStory | null>(null);
   const storyRef = useRef<GuestStory | null>(null);
+  const storyHistory = useRef(new Map<string, { at: number; steps: string[] }>());
+  const recentShots = useRef<string[]>([]);
+  const [incidents, setIncidents] = useState<ParkIncident[]>([]);
+  const lastLocalIncident = useRef(0);
   const previousStoryGuests = useRef<Guest[]>([]);
   const storyCooldowns = useRef(new Map<string, number>());
   const lastStoryAt = useRef(0);
@@ -98,7 +105,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
     const timer = setTimeout(() => setSpectacle(undefined), Math.max(0, spectacleStart + spectacleDuration - Date.now()));
     return () => clearTimeout(timer);
   }, [spectacleStart, spectacleDuration]);
-  useEffect(() => { storyRef.current = guestStory; }, [guestStory]);
+  useEffect(() => { if (guestStory) storyRef.current = guestStory; }, [guestStory]);
   useEffect(() => {
     lastDirectorShot.current = Date.now() - 10_000;
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -109,17 +116,31 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
   }, []);
   useEffect(() => {
     const now = Date.now();
-    const candidates = detectGuestStories(previousStoryGuests.current, state.guests, now, state.grid);
+    if (adminMode && running) {
+      const completed = state.guests.flatMap(guest => {
+        const before = previousStoryGuests.current.find(old => old.id === guest.id);
+        const event = before && rideIncident(before, guest, state, now);
+        return event ? [event] : [];
+      });
+      const walker = state.guests.find(guest => guest.state === 'walking' && guest.path.length > 0);
+      if (walker && now - lastLocalIncident.current > 24_000) {
+        const kind = (['photo', 'balloon', 'mascot', 'photo'] as const)[Math.floor(now / 24000) % 4];
+        completed.push(guestIncident(walker, kind, now));
+        lastLocalIncident.current = now;
+      }
+      if (completed.length) setIncidents(previous => [...previous.filter(event => event.expiresAt > now), ...completed].slice(-8));
+    }
+    const candidates = detectGuestStories(previousStoryGuests.current, state.guests, now, state.grid).map(story => connectGuestStory(story, storyHistory.current));
     // Preserve completed-ride history before the next simulation update mutates it.
     previousStoryGuests.current = state.guests.map(guest => ({ ...guest, ridesRidden: [...guest.ridesRidden] }));
     if (!running || now - lastStoryAt.current < 20_000) return;
-    const next = candidates.find(story => now - (storyCooldowns.current.get(story.guestId) ?? 0) > 120_000);
+    const next = candidates.find(story => story.guestId === storyRef.current?.guestId || now - (storyCooldowns.current.get(story.guestId) ?? 0) > 120_000);
     if (!next) return;
     for (const [id, at] of storyCooldowns.current) if (now - at > 300_000) storyCooldowns.current.delete(id);
     storyCooldowns.current.set(next.guestId, now);
     lastStoryAt.current = now;
     setGuestStory(next);
-  }, [state.guests, state.grid, running]);
+  }, [state.guests, state.grid, running, adminMode, state]);
   useEffect(() => {
     if (!guestStory) return;
     const timeout = setTimeout(() => setGuestStory(null), 10_000);
@@ -129,10 +150,11 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
     if (!directorEnabled || !running || !isStateReady) return;
     const timer = setInterval(() => {
       const now = Date.now();
-      if (document.hidden || now - lastDirectorShot.current < 16_000) return;
-      const shot = chooseDirectorShot(latestStateRef.current, spectacleRef.current, storyRef.current, lastDirectorKey.current, now);
+      if (document.hidden || now - lastDirectorShot.current < DIRECTOR_HOLD_MS) return;
+      const shot = chooseDirectorShot(latestStateRef.current, spectacleRef.current, storyRef.current, lastDirectorKey.current, now, recentShots.current);
       if (!shot) return;
       lastDirectorShot.current = now; lastDirectorKey.current = shot.key;
+      recentShots.current = [...recentShots.current, shot.key].slice(-3);
       setSelectedGuestId(null); setSelectedBuilding(null); setSelectedTile(null);
       setFollowingGuestId(shot.guestId ?? null);
       setDirectorCaption(shot.label);
@@ -232,11 +254,11 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       time: new Date().toLocaleTimeString() }, ...previous].slice(0, 50));
   };
 
-  const recordAnnouncementProgress = useCallback((event: Announcement, processed: number, changed: number, stayed: number, responded = 0) => {
+  const recordAnnouncementProgress = useCallback((event: Announcement, processed: number, changed: number, stayed: number, responded = 0, responders: string[] = []) => {
     const current = announcementRef.current;
     if (current?.id !== event.id) return;
     const next: Announcement = { ...current, processed: current.processed + processed,
-      changed: current.changed + changed, stayed: current.stayed + stayed, responded: (current.responded ?? 0) + responded,
+      changed: current.changed + changed, stayed: current.stayed + stayed, responded: (current.responded ?? 0) + responded, responders: [...new Set([...(current.responders ?? []), ...responders])],
       status: current.processed + processed >= current.total ? 'done' : 'deciding' };
     announcementRef.current = next.status === 'done' ? null : next;
     setAnnouncement(next);
@@ -262,14 +284,14 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       const guest = snapshot.guests.find(item => item.id === id);
       if (!guest || (!event && !isDecisionBoundary(guest))) return [];
       const actions = getGuestActions(snapshot.grid, guest,
-        (snapshot.freeHotdogsUntilTick ?? 0) > snapshot.tick, event?.text).filter(action => action.distance * 2500 + 20_000 <= remainingShowMs).map(({ id: actionId, kind, label, price, distance, buildingId }) =>
+        (snapshot.freeHotdogsUntilTick ?? 0) > snapshot.tick, event?.text, snapshot.guests).filter(action => action.distance * 2500 + 20_000 <= remainingShowMs).map(({ id: actionId, kind, label, price, distance, buildingId }) =>
         ({ id: actionId, kind, label, price, distance, queue: kind === 'ride' && buildingId ? queueCounts.get(buildingId) ?? 0 : 0 }));
       if (event) actions.unshift({ id: 'continue', kind: 'continue', label: `Keep ${guest.state} as planned`,
         price: 0, distance: 0, queue: 0 });
-      return [{ id, guest: { hunger: guest.hunger, thirst: guest.thirst, energy: guest.energy,
+      return [{ id, ...(!event ? { codeChoice: companionAction(guest, snapshot.guests, actions) ?? personalityAction(guest, actions) } : {}), guest: { hunger: guest.hunger, thirst: guest.thirst, energy: guest.energy,
         bathroom: guest.bathroom, nausea: guest.nausea, happiness: guest.happiness, cash: guest.cash,
         preferExcitement: guest.preferExcitement, preferIntensity: guest.preferIntensity,
-        activity: guest.state, timeInPark: guest.timeInPark, ridesRidden: guest.ridesRidden.slice(-32) }, actions }];
+        ...guestSocialContext(guest, snapshot.guests), activity: guest.state, timeInPark: guest.timeInPark, ridesRidden: guest.ridesRidden.slice(-32) }, actions }];
     });
     const manager = includeManager ? { actions: [
       { id: 'keep', label: 'Keep park settings' },
@@ -327,7 +349,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
         if (event && !accepted) {
           stayed++;
           entries.push({ guestId: decision.id, name: guest?.name, kind: 'continue', action: 'Kept their current plan',
-            mode: result.mode, time: new Date().toLocaleTimeString() });
+            mode: result.mode, probability: result.mode === 'live' ? decision.probability : undefined, time: new Date().toLocaleTimeString() });
           continue;
         }
         if (accepted) {
@@ -351,10 +373,10 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
           if (selected?.kind === 'ride') newRideChoices++;
           choicePatch[decision.id] = { action: sentence, probability: decision.probability };
           entries.push({ guestId: decision.id, name: guest?.name, kind: selected?.kind, action: sentence, broadcast: Boolean(event), ...(related ? { radio: { id: event.id, text: event.text, at: Date.now() } } : {}),
-            mode: result.mode, time: new Date().toLocaleTimeString() });
+            mode: result.mode, probability: result.mode === 'live' ? decision.probability : undefined, time: new Date().toLocaleTimeString() });
         }
       }
-      if (event) recordAnnouncementProgress(event, ids.length, changed, stayed, responded);
+      if (event) recordAnnouncementProgress(event, ids.length, changed, stayed, responded, entries.filter(entry => entry.radio).flatMap(entry => entry.guestId ? [entry.guestId] : []));
       if (newMarks.length) setReactionMarks(previous => [...previous.filter(mark => Date.now() - mark.at < 5000), ...newMarks].slice(-24));
       if (Object.keys(choicePatch).length) {
         const active = new Set(latestStateRef.current.guests.map(guest => guest.id));
@@ -496,7 +518,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       }
       if (broadcastText) {
         setAnnouncement({ id: --previewBroadcast, text: broadcastText, total: snapshot.guests.length,
-          processed: entries.length, changed, stayed: entries.length - changed, responded, status: 'done',
+          processed: entries.length, changed, stayed: entries.length - changed, responded, responders: entries.filter(entry => entry.radio).flatMap(entry => entry.guestId ? [entry.guestId] : []), status: 'done',
           park: summarizePark(snapshot, /free hot dogs/i.test(broadcastText)) });
         setShowAnnouncement(true);
       }
@@ -519,7 +541,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       setFeed(preview.feed.filter(entry => entry.kind !== 'continue'));
       setMode('offline');
       setDecisionCount(preview.decisionCount);
-      setLastChoices(Object.fromEntries(preview.feed.filter(entry => entry.guestId).toReversed().map(entry => [entry.guestId!, { action: entry.action }])));
+      setLastChoices(Object.fromEntries(preview.feed.filter(entry => entry.guestId).toReversed().map(entry => [entry.guestId!, { action: entry.action, probability: entry.probability }])));
     }).catch(() => {});
     let controller: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -547,22 +569,23 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
           lastFrame = frame;
         }
         setSpectacle(snapshot.spectacle && Date.now() < snapshot.spectacle.startedAt + snapshot.spectacle.durationMs ? snapshot.spectacle : undefined);
+        setIncidents(snapshot.incidents ?? []);
         setPopulation(snapshot.population);
         setTarget(snapshot.guests.length);
         setFeed(snapshot.feed.filter(entry => entry.kind !== 'continue'));
         setMode(snapshot.mode);
         setDecisionCount(snapshot.decisionCount);
         setLastChoices(Object.fromEntries(snapshot.feed.filter(entry => entry.guestId)
-          .toReversed().map(entry => [entry.guestId!, { action: entry.action }])));
+          .toReversed().map(entry => [entry.guestId!, { action: entry.action, probability: entry.probability }])));
         const event = snapshot.announcement;
         if (event && event.id !== lastWatchAnnouncement.current && Date.now() - event.at < 45_000) {
           lastWatchAnnouncement.current = event.id;
           setAnnouncement({ id: event.id, text: event.text, total: event.total,
-            processed: event.processed, changed: event.changed, stayed: event.stayed, responded: event.responded ?? 0, status: event.status,
+            processed: event.processed, changed: event.changed, stayed: event.stayed, responded: event.responded ?? 0, responders: event.responders, status: event.status,
             park: summarizePark(latestStateRef.current) });
           setShowAnnouncement(true);
         } else if (event && event.id === lastWatchAnnouncement.current) {
-          setAnnouncement(previous => previous?.id === event.id ? { ...previous, total: event.total, processed: event.processed, changed: event.changed, stayed: event.stayed, responded: event.responded ?? 0, status: event.status } : previous);
+          setAnnouncement(previous => previous?.id === event.id ? { ...previous, total: event.total, processed: event.processed, changed: event.changed, stayed: event.stayed, responded: event.responded ?? 0, responders: event.responders, status: event.status } : previous);
         }
         if (snapshot.budget?.exhausted && snapshot.budget.resetsAt !== lastBudgetReset.current) {
           lastBudgetReset.current = snapshot.budget.resetsAt;
@@ -680,6 +703,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
     announcementQueue.current = []; announcementRef.current = null; deferredChoices.current.clear();
     decidedOnce.current.clear();
     setSelectedGuestId(null); setFollowingGuestId(null);
+    setIncidents([]); storyHistory.current.clear(); storyRef.current = null; recentShots.current = [];
     setAnnouncement(null); setShowAnnouncement(false); setReactionMarks([]); setFeed([]); setLastChoices({});
     setRideChoices(0); setDecisionCount(0); budgetSession.current++; budgetNotice.current = false;
     budgetUsed.current = 0; setJevSpent(0); setMode('ready');
@@ -688,6 +712,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
 
   if (!isStateReady) return <main className="h-screen grid place-items-center bg-[#080f12] text-[#d7fa81]">Loading Jevassic Park…</main>;
 
+  const radioImpact = announcementImpact(state.guests, state.grid, announcement);
   return (
     <main className="jevassic-shell h-dvh w-screen bg-[#080f12] text-[#e9f2ed] flex flex-col overflow-hidden">
       <audio ref={parkAudio} preload="none" />
@@ -702,12 +727,15 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
         <section className="relative flex-1 min-h-0 bg-[#142526]" aria-label="Park simulation">
           {isStateReady ? <CoasterGrid selectedTile={selectedTile} reactionMarks={reactionMarks} ambientVisitors={ambientCount}
-            followGuestId={followingGuestId} onFollowStop={stopFollowing} onManualCameraMove={stopDirector} spectacle={spectacle}
+            followGuestId={followingGuestId} onFollowStop={stopFollowing} onManualCameraMove={stopDirector} spectacle={spectacle} incidents={incidents}
+            broadcastResponders={showAnnouncement ? radioImpact.ids : []}
             guestPopup={selectedGuest ? { guestId: selectedGuest.id, content: <>
               <button type="button" aria-label="Close guest details" onClick={() => { setSelectedGuestId(null); setFollowingGuestId(null); }} className="float-right -mr-1 -mt-1 grid h-7 w-7 place-items-center rounded-full text-xl text-[#c6d5ca] hover:bg-[#40533b]">×</button>
               <p className="pr-7 text-base font-bold text-[#ffe374]">{selectedGuest.name}</p>
+              <div className="mt-2 flex flex-wrap gap-1"><span className="rounded-full border border-[#789572] px-2 py-0.5 text-[11px]">{guestPersonality(selectedGuest).icon} {guestPersonality(selectedGuest).label}</span>{selectedGuest.groupId && <span title={guestSocialContext(selectedGuest, state.guests).friends.join(', ')} className="rounded-full border border-[#789572] px-2 py-0.5 text-[11px]">👥 With friends</span>}</div>
               <p className="mt-1 text-xs text-[#c6d5ca]">{(selectedGuest.targetPurchaseKind === 'restroom' && selectedGuest.state === 'shopping' ? 'Using the restroom' : selectedGuest.state === 'walking' && selectedGuest.decisionCooldown > 0 && !selectedGuest.path.length ? 'Resting' : selectedGuest.state === 'eating' && selectedGuest.targetPurchaseKind === 'drink' ? 'Drinking' : selectedIsAudience ? 'Watching' : selectedGuest.state.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase()))}</p>
               <p className="mt-2 text-sm font-semibold">{lastChoices[selectedGuest.id]?.action ?? (selectedGuest.targetPurchaseKind === 'restroom' && selectedGuest.state === 'shopping' ? 'Using the restroom' : selectedGuest.state === 'walking' && selectedGuest.decisionCooldown > 0 && !selectedGuest.path.length ? 'Resting' : selectedGuest.state === 'eating' && selectedGuest.targetPurchaseKind === 'drink' ? 'Drinking' : selectedIsAudience ? 'Watching' : selectedGuest.state.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase()))}</p>
+              {guestStory?.guestId === selectedGuest.id && (guestStory.steps?.length ?? 0) > 1 && <p className="mt-2 text-[11px] leading-relaxed text-[#a8c3aa]">{guestStory!.steps!.join(' → ')}</p>}
               <dl className="mt-3 grid grid-cols-3 gap-3 text-xs text-[#c6d5ca]">
                 <div><dt>Hunger</dt><dd className="mt-1 font-bold text-[#f5f2df]">{Math.round(selectedGuest.hunger)}%</dd></div>
                 <div><dt>Thirst</dt><dd className="mt-1 font-bold text-[#f5f2df]">{Math.round(selectedGuest.thirst)}%</dd></div>
@@ -732,7 +760,8 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
             <button type="button" aria-label="Dismiss guest story" onClick={() => setGuestStory(null)} className="float-right -mt-1 ml-2 text-xl text-[#bdcdbb]">×</button>
             <p className="text-xs font-bold text-[#d7fa81]">{guestStory.icon} {guestStory.name}</p>
             <p className="mt-1 text-sm font-semibold">{guestStory.text}</p>
-            <button type="button" title="Follow guest" aria-label="Follow story guest" onClick={() => focusGuest(guestStory.guestId)} className="mt-3 rounded-full border border-[#789572] bg-[#334c38] px-3 py-1 text-sm">Follow ↗</button>
+            {(guestStory.steps?.length ?? 0) > 1 && <ol className="mt-2 space-y-1 text-xs text-[#baceb9]">{guestStory.steps!.slice(0, -1).map((step, index) => <li key={index}>↳ {step}</li>)}</ol>}
+            <button type="button" title="Follow this developing story" aria-label="Follow story guest" onClick={() => focusGuest(guestStory.guestId)} className="mt-3 rounded-full border border-[#789572] bg-[#334c38] px-3 py-1 text-sm">Follow story ↗</button>
           </div>}
           <dialog ref={controlsDialog} aria-labelledby="controls-title" onClick={event => { if (event.target === controlsDialog.current) controlsDialog.current.close(); }}
             className="max-h-[90dvh] overflow-y-auto w-[min(92vw,420px)] rounded-2xl border-2 border-[#ffe374] bg-[#1c2926] p-0 text-[#f5f2df] shadow-2xl backdrop:bg-[#071210b8]">
@@ -757,7 +786,8 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
             <button type="button" onClick={() => setShowAnnouncement(false)} aria-label="Dismiss announcement" className="absolute right-2 top-1 rounded-full px-2 py-1 text-xl leading-none hover:bg-[#c9984c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#321d1e]">×</button>
             <div className="text-[11px] font-black tracking-[.2em]">📣 PARK RADIO{!announcement.budgetNotice && <> · BROADCAST #{announcement.id}</>}</div>
             <p className="mt-1 text-lg font-black leading-tight">{announcement.text}</p>
-            {!announcement.budgetNotice && <p className="mt-1 text-xs font-bold">{announcement.processed.toLocaleString()} / {announcement.total.toLocaleString()} heard · {announcement.responded ?? 0} interested</p>}
+            {!announcement.budgetNotice && radioImpact.heading > 0 && <p className="mt-1 text-xs">{radioImpact.heading} on the way</p>}
+            {!announcement.budgetNotice && <p className="mt-1 text-xs font-bold">{announcement.processed.toLocaleString()} / {announcement.total.toLocaleString()} heard · {announcement.responded ?? 0} joining</p>}
           </div>}
           {selectedBuilding && <div className="absolute bottom-20 right-4 w-[min(300px,88%)] rounded-xl border-2 border-[#ffe374] bg-[#202725] p-4 text-[#f5f2df] shadow-2xl">
             <button type="button" aria-label="Close map details" onClick={() => { setSelectedBuilding(null); setSelectedTile(null); }} className="float-right text-xl text-[#e8d6b5]">×</button>
@@ -776,6 +806,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
             <span title={running ? 'Simulation is running' : 'Simulation is paused'} aria-label={running ? 'Running' : 'Paused'} className="rounded-md bg-[#314738] px-2 py-1">{running ? '▶ Running' : '⏸ Paused'}</span>
             <span title={`Weather: ${state.weather.current}`} aria-label={`Weather ${state.weather.current}`} className="rounded-md px-2 py-1">{weatherIcon[state.weather.current] ?? '🌤️'} {state.weather.current.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())}</span>
             <span title="In-game park time" aria-label={`Park time ${Math.floor(state.hour)}:${String(Math.floor(state.minute)).padStart(2, '0')}`} className="rounded-md px-2 py-1">🕒 {Math.floor(state.hour)}:{String(Math.floor(state.minute)).padStart(2, '0')}</span>
+            {!spectacle && <span title={`Next show at ${parkRhythm(state.hour).nextShow.hour}:00`} className="hidden rounded-full border border-[#4d6a58] px-2.5 py-1 text-xs sm:inline-flex">Next: {parkRhythm(state.hour).nextShow.label}</span>}
             {spectacle && <button type="button" title="Show this event" onClick={() => { stopDirector(); setSelectedGuestId(null); setSelectedBuilding(null); setNavigationTarget({ ...spectacle.center, zoom: spectacle.kind === 'fireworks' ? .75 : 1.1, smooth: true }); }}
               className="rounded-full border border-[#c4aa65] bg-[#4b4128] px-2.5 py-1 text-[#ffe3a0]">{spectacle.kind === 'parade' ? '🎉 Parade' : spectacle.kind === 'fireworks' ? '🎆 Fireworks' : '⛲ Fountain show'}</button>}
             {(state.freeHotdogsUntilTick ?? 0) > state.tick && <span title="The hotdog giveaway is active" className="rounded-md bg-[#85482e] px-2 py-1">🌭 FREE</span>}
@@ -845,6 +876,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
                   className="decision-message flex w-full items-center gap-3 rounded-xl border border-[#446252] bg-[#223633] px-3 py-3 text-left text-sm text-[#edf1db]">
                   <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#142c23] text-xl">{entry.mode === 'broadcast' ? '📣' : entry.guestId ? actionIcon[entry.kind ?? 'wait'] : '🎟️'}</span>
                   <span className="min-w-0 flex-1">{entry.name && <span className="mb-1 block text-xs font-bold text-[#d7fa81]">{entry.name}</span>}<span className="block font-semibold">{entry.action}</span>
+                    {entry.mode === 'live' && entry.probability != null && Number.isFinite(entry.probability) && <span title="Probability Jev assigned to this choice. This is not a written explanation." className="mt-1 inline-flex rounded-full border border-[#496956] px-2 py-0.5 text-[11px] text-[#bad0bd]">Jev · {Math.round(entry.probability * 100)}%</span>}
                     {isCurrentRadioReaction(entry.radio, announcement, showAnnouncement) && <span title={entry.radio?.text} className="mt-1.5 inline-flex rounded-full border border-[#c6a760] bg-[#4b4024] px-2 py-0.5 text-[11px] text-[#ffdfa2]">📣 Radio</span>}
                     {(!canFollow || !entry.guestId) && <span className="mt-1.5 inline-flex rounded-full border border-[#567264] bg-[#183129] px-2 py-0.5 text-[11px] text-[#cce4ce]">{entry.mode === 'broadcast' ? 'Broadcast' : entry.guestId ? 'Departed' : 'Manager'}</span>}</span>
                   {canFollow && <button type="button" onClick={() => entry.guestId && focusGuest(entry.guestId, 1.8)} title="Follow guest" aria-label="Follow guest"

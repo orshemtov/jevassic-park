@@ -1,3 +1,4 @@
+import { personalizeGuest } from '@/lib/jev/guestPersonality';
 import { guestVisualOffset } from '@/lib/jev/spectatorMotion';
 /**
  * Guest System for IsoCoaster
@@ -67,7 +68,7 @@ export function createGuest(entranceX: number, entranceY: number, gridSize: numb
     direction = 'south';
   }
   
-  return {
+  return personalizeGuest({
     id: generateUUID(),
     name: generateGuestName(),
     
@@ -128,7 +129,7 @@ export function createGuest(entranceX: number, entranceY: number, gridSize: numb
     hasHat: Math.random() > 0.7,
     hatColor: randomFromArray(GUEST_COLORS.hat),
     walkOffset: Math.random() * Math.PI * 2,
-  };
+  });
 }
 
 // =============================================================================
@@ -344,6 +345,14 @@ export function updateGuest(
     if (resting) {
       updatedGuest.nausea = Math.max(0, updatedGuest.nausea - deltaTime * .08);
       updatedGuest.happiness = Math.min(100, updatedGuest.happiness + deltaTime * .005);
+    }
+  }
+
+  if ((updatedGuest.photoPauseTicks ?? 0) > 0) {
+    updatedGuest.photoPauseTicks = Math.max(0, Math.min(40, updatedGuest.photoPauseTicks!) - deltaTime);
+    if (updatedGuest.state === 'walking') {
+      updatedGuest.lastState = previousState;
+      return updatedGuest;
     }
   }
 

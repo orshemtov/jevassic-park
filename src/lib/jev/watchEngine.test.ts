@@ -14,7 +14,7 @@ describe('shared spectator world', () => {
     world.spectacle = createParkSpectacle(park, 'parade', now);
     world.nextAnnouncementAt = Number.MAX_SAFE_INTEGER;
     expect(advanceWatchWorld(world, park, now + 5000).spectacle).toEqual(world.spectacle);
-    expect(advanceWatchWorld(world, park, now + 240000).spectacle).toBeUndefined();
+    expect(advanceWatchWorld(world, park, now + 120000).spectacle).toBeUndefined();
   });
   it('cycles visible weather from watched time and daylight from wall time', () => {
     const world = createWatchWorld(park, 10, now);
@@ -127,17 +127,20 @@ it('offers the announced parade to every broadcast batch without forcing attenda
   const first = buildWatchBatch(world, park);
   expect(first.actors).toHaveLength(8);
   for (const actor of first.actors) {
-    expect(actor.actions.some(action => action.id === target)).toBe(true);
+    const guest = world.guests.find(guest => guest.id === actor.id)!;
+    const option = getGuestActions(park.grid, guest, false, world.announcement!.text).find(action => action.id === target);
+    expect(actor.actions.some(action => action.id === target)).toBe(Boolean(option && option.distance * 2500 + 20000 <= world.spectacle!.durationMs));
     expect(actor.actions.length).toBeLessThanOrEqual(10);
   }
-  const decisions = first.actors.map((actor, index) => ({ id: actor.id, action: index === 0 ? target : 'continue' }));
+  const attendee = first.actors.find(actor => actor.actions.some(action => action.id === target))!;
+  const decisions = first.actors.map(actor => ({ id: actor.id, action: actor.id === attendee.id ? target : 'continue' }));
   const next = applyWatchDecisions(world, first.actors, decisions, 'live', now);
-  expect(next.guests.find(guest => guest.id === first.actors[0].id)?.targetBuildingId).toBe(`${parade.x},${parade.y}`);
+  expect(next.guests.find(guest => guest.id === attendee.id)?.targetBuildingId).toBe(`${parade.x},${parade.y}`);
   expect(next.announcement).toMatchObject({ processed: 8, changed: 1, stayed: 7 });
-  const second = buildWatchBatch(next, park);
+  const second = buildWatchBatch({ ...next, lastBatchBroadcast: false }, park);
   expect(second.actors).toHaveLength(2);
   expect(second.park).toEqual(first.park);
-  expect(second.actors.every(actor => actor.actions.some(action => action.id === target))).toBe(true);
+  expect(second.actors.every(actor => actor.actions.some(action => action.id === 'continue'))).toBe(true);
 });
 
 it('only attributes choices matching the announcement to the radio', () => {
@@ -146,21 +149,23 @@ it('only attributes choices matching the announcement to the radio', () => {
   world.spectacle = createParkSpectacle(park, 'parade', now);
   world.announcement!.text = 'The parade is starting.';
   const batch = buildWatchBatch(world, park);
-  const parade = batch.actors[0].actions.find(action => /parade/i.test(action.label))!;
-  const drink = getGuestActions(park.grid, world.guests.find(guest => guest.id === batch.actors[1].id)!).find(action => action.kind === 'drink')!;
-  expect(batch.actors[1].actions.some(action => action.id === drink.id)).toBe(false);
+  const radioActor = batch.actors.find(actor => actor.actions.some(action => /parade/i.test(action.label)))!;
+  const parade = radioActor.actions.find(action => /parade/i.test(action.label))!;
+  const others = batch.actors.filter(actor => actor.id !== radioActor.id);
+  const drink = getGuestActions(park.grid, world.guests.find(guest => guest.id === others[0].id)!).find(action => action.kind === 'drink')!;
+  expect(others[0].actions.some(action => action.id === drink.id)).toBe(false);
   const next = applyWatchDecisions(world, batch.actors, [
-    { id: batch.actors[0].id, action: parade.id },
-    { id: batch.actors[1].id, action: drink.id },
-    { id: batch.actors[2].id, action: 'continue' },
+    { id: radioActor.id, action: parade.id },
+    { id: others[0].id, action: drink.id },
+    { id: others[1].id, action: 'continue' },
   ], 'live', now);
-  expect(next.announcement).toMatchObject({ processed: 2, responded: 1, changed: 1, stayed: 1 });
+  expect(next.announcement).toMatchObject({ processed: 2, responded: 1, changed: 1, stayed: 1, responders: [radioActor.id] });
   expect(next.feed).toHaveLength(1);
   expect(next.feed[0].kind).toBe('ride');
-  expect(next.feed.find(entry => entry.guestId === batch.actors[0].id)?.radio)
+  expect(next.feed.find(entry => entry.guestId === radioActor.id)?.radio)
     .toEqual({ id: world.announcement!.id, text: 'The parade is starting.', at: world.announcement!.at });
-  expect(next.feed.some(entry => entry.guestId === batch.actors[1].id)).toBe(false);
-  expect(next.feed.find(entry => entry.guestId === batch.actors[2].id)?.radio).toBeUndefined();
+  expect(next.feed.some(entry => entry.guestId === others[0].id)).toBe(false);
+  expect(next.feed.find(entry => entry.guestId === others[1].id)?.radio).toBeUndefined();
 });
 
 
@@ -209,4 +214,50 @@ it('leaves a full normal-play interval after the last radio response', () => {
   const next = applyWatchDecisions(world, batch.actors, [{ id: batch.actors[0].id, action: 'continue' }], 'live', now);
   expect(next.announcement!.pending).toEqual([]);
   expect(next.nextAnnouncementAt - next.watchedMs).toBeGreaterThanOrEqual(60000);
+});
+
+
+it('upgrades legacy guests once without moving, charging or regrouping them', () => {
+  const world = createWatchWorld(park, 10, now);
+  for (const guest of world.guests) { delete guest.personality; delete guest.groupId; }
+  const positions = world.guests.map(guest => ({ id: guest.id, tileX: guest.tileX, tileY: guest.tileY, cash: guest.cash, ridesRidden: guest.ridesRidden }));
+  const upgraded = advanceWatchWorld(world, park, now);
+  expect(upgraded.guests.every(guest => guest.personality)).toBe(true);
+  expect(upgraded.guests.some(guest => guest.groupId)).toBe(true);
+  expect(upgraded.guests.map(guest => ({ id: guest.id, tileX: guest.tileX, tileY: guest.tileY, cash: guest.cash, ridesRidden: guest.ridesRidden }))).toEqual(positions);
+  const reloaded = advanceWatchWorld(JSON.parse(JSON.stringify(upgraded)), park, now);
+  expect(reloaded.guests).toEqual(upgraded.guests);
+  expect(world.guests.every(guest => !guest.personality && !guest.groupId)).toBe(true);
+});
+
+it('alternates a large radio queue with ordinary decisions so neither starves', () => {
+  let world = createWatchWorld(park, 100, now);
+  world = advanceWatchWorld({ ...world, watchedMs: 45000 }, park, now);
+  world.announcement!.text = 'The hotdog stand is giving away free hot dogs!';
+  let ordinary = 0;
+  let radio = 0;
+  let batches = 0;
+  while (world.announcement!.pending.length && batches < 12) {
+    world.guests = world.guests.map(guest => ({ ...guest, state: 'walking', path: [], pathIndex: 0, progress: 0,
+      targetBuildingId: null, targetBuildingKind: null, queueRideId: null, decisionCooldown: 0 }));
+    const batch = buildWatchBatch(world, park, now + batches * 5000);
+    if (batch.announcement) radio += batch.actors.length;
+    else ordinary += batch.actors.length;
+    world = applyWatchDecisions(world, batch.actors, batch.actors.map(actor => ({ id: actor.id,
+      action: batch.announcement ? 'continue' : actor.actions.find(action => action.kind === 'wait')!.id })), 'offline', now + batches * 5000);
+    batches++;
+  }
+  expect(radio).toBe(100);
+  expect(ordinary).toBeGreaterThan(0);
+  expect(world.announcement!.pending).toEqual([]);
+  expect(batches * 5000).toBeLessThanOrEqual(60000);
+});
+
+
+it('starts a night arrival with fireworks instead of replaying missed daytime shows', () => {
+  const at = Math.floor(now / 600000) * 600000 - 120000 + 500000;
+  const world = advanceWatchWorld(createWatchWorld(park, 10, at), park, at + 5000);
+  expect(world.spectacle?.kind).toBe('fireworks');
+  expect(world.showsStarted).toContain('parade');
+  expect(world.showsStarted).toContain('fountain');
 });

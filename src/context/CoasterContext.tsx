@@ -17,6 +17,7 @@ import { chargeGuestForActivity, createGuest, updateGuest } from '@/components/c
 import { getGuestActions, isDecisionBoundary } from '@/lib/jev/decisions';
 import { perlinNoise } from '@/lib/simulation';
 import { reconcileSpectatorGuests } from '@/lib/jev/spectatorMotion';
+import { assignGuestGroups } from '@/lib/jev/guestPersonality';
 import {
   COASTER_AUTOSAVE_KEY,
   COASTER_SAVED_PARK_PREFIX,
@@ -3368,7 +3369,7 @@ export function CoasterProvider({
           tileX: tile.x, tileY: tile.y, targetTileX: tile.x, targetTileY: tile.y,
           decisionCooldown: 0, cash: guest.cash - fee, totalSpent: guest.totalSpent + fee };
       });
-      return { ...prev, guests: [...prev.guests, ...added],
+      return { ...prev, guests: assignGuestGroups([...prev.guests, ...added]),
         stats: { ...prev.stats, guestsTotal: prev.stats.guestsTotal + count },
         finances: { ...prev.finances, cash: prev.finances.cash + admissionRevenue,
           incomeAdmissions: prev.finances.incomeAdmissions + admissionRevenue,
@@ -3382,11 +3383,11 @@ export function CoasterProvider({
     const canChoose = (item: Guest) => isDecisionBoundary(item) ||
       (interrupt && ['walking', 'entering', 'queuing', 'leaving'].includes(item.state));
     if (!guest || !canChoose(guest) || !getGuestActions(current.grid, guest,
-      (current.freeHotdogsUntilTick ?? 0) > current.tick, announcement).some(action => action.id === actionId)) return false;
+      (current.freeHotdogsUntilTick ?? 0) > current.tick, announcement, current.guests, true).some(action => action.id === actionId)) return false;
     setState(prev => ({ ...prev, guests: prev.guests.map(item => {
       if (item.id !== id || !canChoose(item)) return item;
       const action = getGuestActions(prev.grid, item,
-        (prev.freeHotdogsUntilTick ?? 0) > prev.tick, announcement).find(option => option.id === actionId);
+        (prev.freeHotdogsUntilTick ?? 0) > prev.tick, announcement, prev.guests, true).find(option => option.id === actionId);
       if (!action) return item;
       if (action.kind === 'wait') return { ...item, state: 'walking' as const, path: [], pathIndex: 0,
         progress: 0, targetBuildingId: null, targetBuildingKind: null, queueRideId: null,

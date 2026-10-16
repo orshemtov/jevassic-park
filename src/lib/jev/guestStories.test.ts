@@ -70,3 +70,14 @@ describe('guest stories', () => {
     expect(detectGuestStories(previous, current, 100)).toHaveLength(3);
   });
 });
+
+it('connects observed moments into a short story and expires old history', async () => {
+  const { connectGuestStory } = await import('./guestStories');
+  const history = new Map<string, { at: number; steps: string[] }>();
+  const story = { id: 'ride', guestId: 'ada', name: 'Ada', icon: '🎢', text: 'Another ride conquered.', at: 100 };
+  expect(connectGuestStory(story, history).steps).toEqual([story.text]);
+  const snack = { ...story, id: 'snack', text: 'Snack secured.', at: 200 };
+  expect(connectGuestStory(snack, history).steps).toEqual([story.text, snack.text]);
+  expect(connectGuestStory({ ...snack, at: 300 }, history).steps).toEqual([story.text, snack.text]);
+  expect(connectGuestStory({ ...snack, at: 700000 }, history).steps).toEqual([snack.text]);
+});

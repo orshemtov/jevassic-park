@@ -1,3 +1,5 @@
+import { spectacleAnnouncement } from './spectacles';
+
 export const PARK_ANNOUNCEMENTS = [
   'The hotdog stand is giving away free hot dogs!',
   'The parade is starting. Front-row enthusiasm encouraged.',
@@ -8,8 +10,10 @@ export const PARK_ANNOUNCEMENTS = [
 ];
 
 export function nextParkAnnouncement(previous?: string, hour = 12, allowSpectacles = true): string {
-  if (allowSpectacles && (hour >= 20 || hour < 7) && !/fireworks/i.test(previous ?? '')) return 'Fireworks above the castle! Come watch the sky sparkle.';
-  const available = allowSpectacles ? PARK_ANNOUNCEMENTS : PARK_ANNOUNCEMENTS.filter(text => !/parade|fountain show|fireworks/i.test(text));
+  if (hour >= 11 && hour < 14 && previous !== PARK_ANNOUNCEMENTS[0]) return PARK_ANNOUNCEMENTS[0];
+  const scheduled = hour >= 20 || hour < 7 ? 'fireworks' : hour >= 18 ? 'fountain' : hour >= 14 ? 'parade' : undefined;
+  if (allowSpectacles && scheduled && !new RegExp(scheduled === 'fountain' ? 'fountain show' : scheduled, 'i').test(previous ?? '')) return spectacleAnnouncement(scheduled);
+  const available = PARK_ANNOUNCEMENTS.filter(text => !/parade|fountain show|fireworks/i.test(text));
   const choices = available.filter(text => text !== previous);
   return choices[Math.floor(Math.random() * choices.length)];
 }

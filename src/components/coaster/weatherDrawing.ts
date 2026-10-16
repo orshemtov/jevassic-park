@@ -1,8 +1,8 @@
 import type { WeatherType } from '@/games/coaster/types/economy';
 
 // Screen-space rain covers the whole viewport at every pan, zoom and pixel density.
-export function rainDrops(width: number, height: number, time: number, storm: boolean) {
-  const count = Math.min(240, Math.max(40, Math.ceil(width * height / (storm ? 6500 : 10000))));
+export function rainDrops(width: number, height: number, time: number, storm: boolean, mobile = false) {
+  const count = Math.min(mobile ? 90 : 240, Math.max(40, Math.ceil(width * height / (storm ? 6500 : 10000))));
   const columns = Math.ceil(Math.sqrt(count * width / Math.max(1, height)));
   const rows = Math.ceil(count / columns);
   return Array.from({ length: count }, (_, index) => {
@@ -13,7 +13,7 @@ export function rainDrops(width: number, height: number, time: number, storm: bo
   });
 }
 
-export function drawParkWeather(ctx: CanvasRenderingContext2D, weather: WeatherType, width: number, height: number, time: number, dpr: number, reducedMotion: boolean) {
+export function drawParkWeather(ctx: CanvasRenderingContext2D, weather: WeatherType, width: number, height: number, time: number, dpr: number, reducedMotion: boolean, mobile = false) {
   if (width <= 0 || height <= 0) return;
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -26,7 +26,7 @@ export function drawParkWeather(ctx: CanvasRenderingContext2D, weather: WeatherT
   }
   if ((weather === 'rain' || weather === 'storm') && !reducedMotion) {
     const storm = weather === 'storm';
-    const drops = rainDrops(width, height, time, storm);
+    const drops = rainDrops(width, height, time, storm, mobile);
     ctx.strokeStyle = storm ? '#d7eaff8c' : '#d7edff75';
     ctx.lineWidth = storm ? 1.2 : .9;
     ctx.beginPath();

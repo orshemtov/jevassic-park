@@ -159,3 +159,13 @@ it('accepts a reachable restroom option and rejects unbounded visit history', as
   expect((await POST(request({ decisionMode: 'code', park: state,
     actors: [{ ...visiting, guest: { ...visiting.guest, ridesRidden: Array(33).fill('1,1') } }] }))).status).toBe(400);
 });
+
+it('honors only legal Code personality choices without calling Jev', async () => {
+  const response = await POST(request({ decisionMode: 'code', park,
+    actors: [{ ...actor, codeChoice: 'wait', guest: { ...actor.guest, personality: 'Cautious', friends: ['Ada Park'], destination: '2,1', groupId: 'friends:ada' } }] }));
+  expect(response.status).toBe(200);
+  expect((await response.json()).decisions[0].action).toBe('wait');
+  expect(experimental_decide).not.toHaveBeenCalled();
+  expect((await POST(request({ decisionMode: 'code', park, actors: [{ ...actor, codeChoice: 'ride:999,999' }] }))).status).toBe(400);
+  expect((await POST(request({ decisionMode: 'code', park, actors: [{ ...actor, guest: { ...actor.guest, friends: Array(4).fill('Ada') } }] }))).status).toBe(400);
+});

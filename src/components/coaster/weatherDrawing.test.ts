@@ -8,6 +8,7 @@ describe('park weather coverage', () => {
     expect(drops.some(drop => drop.x > 1700 && drop.y > 900)).toBe(true);
     expect(drops.some(drop => drop.x < 200 && drop.y < 150)).toBe(true);
     expect(rainDrops(8000, 4000, 0, true)).toHaveLength(240);
+    expect(rainDrops(8000, 4000, 0, true, true)).toHaveLength(90);
     expect(rainDrops(1920, 1080, 1, false)[0]).not.toEqual(drops[0]);
   });
   it('uses only a full viewport tint with reduced motion', () => {
