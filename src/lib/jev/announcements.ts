@@ -14,3 +14,10 @@ export function nextParkAnnouncement(previous?: string): string {
 export function announcementDelay(first = false): number {
   return first ? 20_000 + Math.floor(Math.random() * 15_000) : 60_000 + Math.floor(Math.random() * 40_000);
 }
+
+export type RadioReaction = { id: number; text: string; at: number };
+
+export function isCurrentRadioReaction(reaction: RadioReaction | undefined, announcement: { id: number } | null,
+  visible: boolean, now = Date.now()): boolean {
+  return Boolean(visible && reaction && reaction.id === announcement?.id && now - reaction.at < 45_000);
+}

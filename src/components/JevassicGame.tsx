@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CoasterProvider, useCoaster } from '@/context/CoasterContext';
 import { CoasterGrid } from '@/components/coaster/CoasterGrid';
-import { getGuestActions, isDecisionBoundary, attractionName, type ActionKind } from '@/lib/jev/decisions';
+import { getGuestActions, isDecisionBoundary, attractionName, announcedAttraction, type ActionKind } from '@/lib/jev/decisions';
 import { watchEnvironment } from '@/lib/jev/environment';
 import { previewAnnouncementDecisions, previewDecisions } from '@/lib/jev/previewDecisions';
 import { summarizePark, type ParkState } from '@/lib/jev/parkState';
 import type { GameState } from '@/games/coaster/types/game';
 import type { Guest } from '@/games/coaster/types/economy';
-import { announcementDelay, nextParkAnnouncement } from '@/lib/jev/announcements';
+import { announcementDelay, nextParkAnnouncement, isCurrentRadioReaction, type RadioReaction } from '@/lib/jev/announcements';
 import { attractionActivity, activityLabels, emptyActivity } from '@/lib/jev/attractionActivity';
 import { connectParkAudio } from '@/lib/jev/parkAudio';
 import { recordPark, type RecordingSnapshot } from '@/lib/recordPark';
@@ -17,10 +17,10 @@ import { recordPark, type RecordingSnapshot } from '@/lib/recordPark';
 const PRESETS = [10, 100, 1000, 5000, 10000];
 type Decision = { id: string; action: string; probability?: number };
 type DecisionResponse = { mode: 'live' | 'offline'; decisions: Decision[]; manager?: string; error?: string; usage?: { inputTokens?: number | null } };
-type FeedEntry = { id?: number; action: string; mode: string; time: string; guestId?: string; name?: string; kind?: ActionKind; broadcast?: boolean };
+type FeedEntry = { id?: number; action: string; mode: string; time: string; guestId?: string; name?: string; kind?: ActionKind; broadcast?: boolean; radio?: RadioReaction };
 type ReactionMark = { id: string; icon: string; at: number };
 type Announcement = { id: number; text: string; total: number; processed: number;
-  changed: number; stayed: number; status: 'deciding' | 'done'; park: ParkState; budgetNotice?: boolean };
+  changed: number; stayed: number; responded?: number; status: 'deciding' | 'done'; park: ParkState; budgetNotice?: boolean };
 const ANNOUNCEMENTS = [
   'The hotdog stand is giving away free hot dogs!',
   'Our mascot has escaped. It is three ducks in a trench coat.',
@@ -34,7 +34,7 @@ const weatherIcon: Record<string, string> = { sunny: '☀️', partly_cloudy: '�
 type GameOptions = { adminMode: boolean; decisionIntervalMs: number; spectatorPopulation: number };
 type WatchSnapshot = Pick<GameState, 'hour' | 'minute' | 'weather'> & { guests: Guest[]; tick: number; feed: FeedEntry[]; mode: 'live' | 'offline';
   decisionCount: number; population: number; budget?: { exhausted: boolean; resetsAt: string };
-  announcement?: { id: number; text: string; at: number; total: number; processed: number; changed: number; stayed: number; status: 'deciding' | 'done' } };
+  announcement?: { id: number; text: string; at: number; total: number; processed: number; changed: number; stayed: number; responded?: number; status: 'deciding' | 'done' } };
 
 function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, spectatorPopulation }: GameOptions) {
   const { state, latestStateRef, isStateReady, setSpeed, setGuestTarget, applyGuestChoice,
@@ -156,11 +156,11 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       time: new Date().toLocaleTimeString() }, ...previous].slice(0, 50));
   };
 
-  const recordAnnouncementProgress = useCallback((event: Announcement, processed: number, changed: number, stayed: number) => {
+  const recordAnnouncementProgress = useCallback((event: Announcement, processed: number, changed: number, stayed: number, responded = 0) => {
     const current = announcementRef.current;
     if (current?.id !== event.id) return;
     const next: Announcement = { ...current, processed: current.processed + processed,
-      changed: current.changed + changed, stayed: current.stayed + stayed,
+      changed: current.changed + changed, stayed: current.stayed + stayed, responded: (current.responded ?? 0) + responded,
       status: current.processed + processed >= current.total ? 'done' : 'deciding' };
     announcementRef.current = next.status === 'done' ? null : next;
     setAnnouncement(next);
@@ -236,6 +236,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       const entries: FeedEntry[] = [];
       const choicePatch: Record<string, { action: string; probability?: number }> = {};
       let newRideChoices = 0;
+      let responded = 0;
       let changed = 0, stayed = event ? ids.length - result.decisions.length : 0;
       const newMarks: ReactionMark[] = [];
       for (const decision of result.decisions) {
@@ -253,6 +254,8 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
         if (accepted) {
           decidedOnce.current.add(decision.id);
           const selected = actors.find(actor => actor.id === decision.id)?.actions.find(action => action.id === decision.action);
+          const related = event && selected && announcedAttraction(event.text, selected.label);
+          if (related) responded++;
           const description = event && keep ? 'Kept their plan' :
             event && selected?.kind === 'food' && selected.price === 0 ? 'Free hot dogs!' :
             event && selected ? `New plan: ${selected.label}` :
@@ -268,11 +271,11 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
             icon: keep ? '😎' : selected?.kind === 'food' ? '🌭' : selected?.kind === 'leave' ? '🏃' : '🤯', at: Date.now() });
           if (selected?.kind === 'ride') newRideChoices++;
           choicePatch[decision.id] = { action: sentence, probability: decision.probability };
-          entries.push({ guestId: decision.id, name: guest?.name, kind: selected?.kind, action: sentence, broadcast: Boolean(event),
+          entries.push({ guestId: decision.id, name: guest?.name, kind: selected?.kind, action: sentence, broadcast: Boolean(event), ...(related ? { radio: { id: event.id, text: event.text, at: Date.now() } } : {}),
             mode: result.mode, time: new Date().toLocaleTimeString() });
         }
       }
-      if (event) recordAnnouncementProgress(event, ids.length, changed, stayed);
+      if (event) recordAnnouncementProgress(event, ids.length, changed, stayed, responded);
       if (newMarks.length) setReactionMarks(previous => [...previous.filter(mark => Date.now() - mark.at < 5000), ...newMarks].slice(-24));
       if (Object.keys(choicePatch).length) {
         const active = new Set(latestStateRef.current.guests.map(guest => guest.id));
@@ -397,18 +400,21 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
       applySpectatorSnapshot(watchEnvironment({ updatedAt: Date.now(), watchedMs: Date.now() - previewStarted, tick: snapshot.tick }, snapshot));
       const entries: FeedEntry[] = [];
       const choices: Record<string, { action: string }> = {};
-      let changed = 0;
+      let changed = 0, responded = 0;
+      const radio: RadioReaction | undefined = broadcastText ? { id: previewBroadcast - 1, text: broadcastText, at: Date.now() } : undefined;
       const decisions = broadcastText ? previewAnnouncementDecisions(snapshot, broadcastText) : previewDecisions(snapshot);
       for (const { guest, action, label } of decisions) {
         if (action.kind !== 'continue' && !applyGuestChoice(guest.id, action.id, Boolean(broadcastText), broadcastText)) continue;
         if (action.kind !== 'continue') changed++;
+        const related = broadcastText && announcedAttraction(broadcastText, action.label);
+        if (related) responded++;
         entries.push({ id: --fallbackSequence, guestId: guest.id, name: guest.name,
-          kind: action.kind, action: label, broadcast: Boolean(broadcastText), mode: 'offline', time: new Date().toLocaleTimeString() });
+          kind: action.kind, action: label, broadcast: Boolean(broadcastText), ...(related ? { radio } : {}), mode: 'offline', time: new Date().toLocaleTimeString() });
         choices[guest.id] = { action: label };
       }
       if (broadcastText) {
         setAnnouncement({ id: --previewBroadcast, text: broadcastText, total: snapshot.guests.length,
-          processed: entries.length, changed, stayed: entries.length - changed, status: 'done',
+          processed: entries.length, changed, stayed: entries.length - changed, responded, status: 'done',
           park: summarizePark(snapshot, /free hot dogs/i.test(broadcastText)) });
         setShowAnnouncement(true);
       }
@@ -469,11 +475,11 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
         if (event && event.id !== lastWatchAnnouncement.current && Date.now() - event.at < 45_000) {
           lastWatchAnnouncement.current = event.id;
           setAnnouncement({ id: event.id, text: event.text, total: event.total,
-            processed: event.processed, changed: event.changed, stayed: event.stayed, status: event.status,
+            processed: event.processed, changed: event.changed, stayed: event.stayed, responded: event.responded ?? 0, status: event.status,
             park: summarizePark(latestStateRef.current) });
           setShowAnnouncement(true);
         } else if (event && event.id === lastWatchAnnouncement.current) {
-          setAnnouncement(previous => previous?.id === event.id ? { ...previous, total: event.total, processed: event.processed, changed: event.changed, stayed: event.stayed, status: event.status } : previous);
+          setAnnouncement(previous => previous?.id === event.id ? { ...previous, total: event.total, processed: event.processed, changed: event.changed, stayed: event.stayed, responded: event.responded ?? 0, status: event.status } : previous);
         }
         if (snapshot.budget?.exhausted && snapshot.budget.resetsAt !== lastBudgetReset.current) {
           lastBudgetReset.current = snapshot.budget.resetsAt;
@@ -642,7 +648,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
             <button type="button" onClick={() => setShowAnnouncement(false)} aria-label="Dismiss announcement" className="absolute right-2 top-1 rounded-full px-2 py-1 text-xl leading-none hover:bg-[#c9984c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#321d1e]">×</button>
             <div className="text-[11px] font-black tracking-[.2em]">📣 PARK RADIO{!announcement.budgetNotice && <> · BROADCAST #{announcement.id}</>}</div>
             <p className="mt-1 text-lg font-black leading-tight">{announcement.text}</p>
-            {!announcement.budgetNotice && <p className="mt-1 text-xs font-bold">{announcement.processed.toLocaleString()} / {announcement.total.toLocaleString()} heard · {announcement.changed} changed plans · {announcement.stayed} stayed</p>}
+            {!announcement.budgetNotice && <p className="mt-1 text-xs font-bold">{announcement.processed.toLocaleString()} / {announcement.total.toLocaleString()} heard · {announcement.responded ?? 0} interested</p>}
           </div>}
           {selectedBuilding && <div className="absolute bottom-20 right-4 w-[min(300px,88%)] rounded-xl border-2 border-[#ffe374] bg-[#202725] p-4 text-[#f5f2df] shadow-2xl">
             <button type="button" aria-label="Close map details" onClick={() => { setSelectedBuilding(null); setSelectedTile(null); }} className="float-right text-xl text-[#e8d6b5]">×</button>
@@ -722,7 +728,7 @@ function Park({ adminMode, decisionIntervalMs: initialDecisionIntervalMs, specta
                   className="decision-message flex w-full items-center gap-3 rounded-xl border border-[#446252] bg-[#223633] px-3 py-3 text-left text-sm text-[#edf1db]">
                   <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#142c23] text-xl">{entry.mode === 'broadcast' ? '📣' : entry.guestId ? actionIcon[entry.kind ?? 'wait'] : '🎟️'}</span>
                   <span className="min-w-0 flex-1">{entry.name && <span className="mb-1 block text-xs font-bold text-[#d7fa81]">{entry.name}</span>}<span className="block font-semibold">{entry.action}</span>
-                    {entry.broadcast && <span className="mt-1.5 inline-flex rounded-full border border-[#c6a760] bg-[#4b4024] px-2 py-0.5 text-[11px] text-[#ffdfa2]">📣 Radio reaction</span>}
+                    {isCurrentRadioReaction(entry.radio, announcement, showAnnouncement) && <span title={entry.radio?.text} className="mt-1.5 inline-flex rounded-full border border-[#c6a760] bg-[#4b4024] px-2 py-0.5 text-[11px] text-[#ffdfa2]">📣 Radio</span>}
                     {(!canFollow || !entry.guestId) && <span className="mt-1.5 inline-flex rounded-full border border-[#567264] bg-[#183129] px-2 py-0.5 text-[11px] text-[#cce4ce]">{entry.mode === 'broadcast' ? 'Broadcast' : entry.guestId ? 'Departed' : 'Manager'}</span>}</span>
                   {canFollow && <button type="button" onClick={() => entry.guestId && focusGuest(entry.guestId, 1.8)} title="Follow guest" aria-label="Follow guest"
                     className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[#6a8a71] bg-[#31543b] text-lg text-[#e7ffc4] transition-colors hover:bg-[#507547] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ffe374]">↗</button>}

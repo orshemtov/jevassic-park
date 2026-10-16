@@ -176,7 +176,7 @@ it.each([
   expect(getGuestActions(facilities, guest).some(action => action.id === 'ride:11,1')).toBe(false);
   const promoted = getGuestActions(facilities, guest, false, text);
   expect(promoted.some(action => action.id === 'ride:11,1')).toBe(true);
-  expect(promoted.length + 1).toBeLessThanOrEqual(10);
+  expect(promoted).toHaveLength(1);
   facilities[2][10].path = false;
   expect(getGuestActions(facilities, guest, false, text).some(action => action.id === 'ride:11,1')).toBe(false);
 });

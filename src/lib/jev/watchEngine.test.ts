@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { GameState } from '@/games/coaster/types/game';
+import { getGuestActions } from './decisions';
 import { advanceWatchWorld, applyWatchDecisions, buildWatchBatch, createWatchWorld, watchEnvironment } from './watchEngine';
 
 const park: GameState = JSON.parse(readFileSync('public/parks/showcase.json', 'utf8'));
@@ -125,4 +126,24 @@ it('offers the announced parade to every broadcast batch without forcing attenda
   expect(second.actors).toHaveLength(2);
   expect(second.park).toEqual(first.park);
   expect(second.actors.every(actor => actor.actions.some(action => action.id === target))).toBe(true);
+});
+
+it('only attributes choices matching the announcement to the radio', () => {
+  let world = createWatchWorld(park, 10, now);
+  world = advanceWatchWorld({ ...world, watchedMs: 45000 }, park, now);
+  world.announcement!.text = 'The parade is starting.';
+  const batch = buildWatchBatch(world, park);
+  const parade = batch.actors[0].actions.find(action => /parade/i.test(action.label))!;
+  const drink = getGuestActions(park.grid, world.guests.find(guest => guest.id === batch.actors[1].id)!).find(action => action.kind === 'drink')!;
+  expect(batch.actors[1].actions.some(action => action.id === drink.id)).toBe(false);
+  const next = applyWatchDecisions(world, batch.actors, [
+    { id: batch.actors[0].id, action: parade.id },
+    { id: batch.actors[1].id, action: drink.id },
+    { id: batch.actors[2].id, action: 'continue' },
+  ], 'live', now);
+  expect(next.announcement).toMatchObject({ processed: 2, responded: 1, changed: 1, stayed: 1 });
+  expect(next.feed.find(entry => entry.guestId === batch.actors[0].id)?.radio)
+    .toEqual({ id: world.announcement!.id, text: 'The parade is starting.', at: world.announcement!.at });
+  expect(next.feed.some(entry => entry.guestId === batch.actors[1].id)).toBe(false);
+  expect(next.feed.find(entry => entry.guestId === batch.actors[2].id)?.radio).toBeUndefined();
 });

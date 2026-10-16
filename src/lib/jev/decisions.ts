@@ -32,7 +32,7 @@ export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = fals
   const size = grid.length;
   const start = key(guest.tileX, guest.tileY);
   if (!grid[guest.tileY]?.[guest.tileX]?.path && !grid[guest.tileY]?.[guest.tileX]?.queue) {
-    return [{ id: 'wait', kind: 'wait', label: 'Wait for a path', price: 0, distance: 0, queue: 0, path: [] }];
+    return announcement ? [] : [{ id: 'wait', kind: 'wait', label: 'Wait for a path', price: 0, distance: 0, queue: 0, path: [] }];
   }
 
   // One breadth-first search serves every destination for this guest.
@@ -88,7 +88,8 @@ export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = fals
   candidates.sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id));
   const picked: GuestAction[] = [];
   const promoted = candidates.find(candidate => announcedAttraction(announcement, candidate.label));
-  if (promoted) picked.push(promoted);
+  // Radio offers a specific detour; unrelated needs stay in the normal decision loop.
+  if (announcement) return promoted ? [promoted] : [];
   for (const kind of ['ride', 'food', 'drink', 'shop', 'restroom'] as const) {
     const first = kind === 'food' && freeHotdogs
       ? candidates.find(candidate => candidate.kind === 'food' && candidate.price === 0) ?? candidates.find(candidate => candidate.kind === kind)
@@ -131,7 +132,7 @@ export function chooseOffline(guest: ChoosingGuest, actions: Pick<GuestAction, '
     actions.find(action => action.kind === 'shop')?.id ?? actions.find(action => action.kind === 'ride')?.id ?? 'wait';
 }
 
-function announcedAttraction(announcement: string, label: string): boolean {
+export function announcedAttraction(announcement: string, label: string): boolean {
   return [/parade/i, /ferris wheel/i, /carousel/i, /sky swing/i, /hot\s*dogs?/i]
     .some(pattern => pattern.test(announcement) && pattern.test(label));
 }

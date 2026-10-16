@@ -19,7 +19,7 @@ function response(world: WatchWorld) {
     budget: { exhausted: Boolean(world.budgetExhausted), resetsAt: new Date(Date.parse(`${world.day}T00:00:00Z`) + 86_400_000).toISOString() },
     feed: world.feed.map(entry => ({ ...entry, time: new Date(entry.time).toLocaleTimeString('en-GB') })),
     ...(world.announcement ? { announcement: { id: world.announcement.id, text: world.announcement.text, at: world.announcement.at,
-      total: world.announcement.total, processed: world.announcement.processed, changed: world.announcement.changed, stayed: world.announcement.stayed,
+      total: world.announcement.total, processed: world.announcement.processed, changed: world.announcement.changed, stayed: world.announcement.stayed, responded: world.announcement.responded ?? 0,
       status: world.announcement.pending.length ? 'deciding' : 'done' } } : {}),
   }, { headers: { 'Cache-Control': 'public, max-age=0, s-maxage=1', 'X-Content-Type-Options': 'nosniff' } });
 }
