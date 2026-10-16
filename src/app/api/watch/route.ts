@@ -15,6 +15,7 @@ const getPark = () => park ??= JSON.parse(readFileSync(`${process.cwd()}/public/
 
 function response(world: WatchWorld) {
   return NextResponse.json({ guests: world.guests, tick: world.tick, population: world.population, ...watchEnvironment(world, getPark()),
+    ...(world.spectacle ? { spectacle: world.spectacle } : {}),
     mode: world.mode, decisionCount: world.decisionCount,
     budget: { exhausted: Boolean(world.budgetExhausted), resetsAt: new Date(Date.parse(`${world.day}T00:00:00Z`) + 86_400_000).toISOString() },
     feed: world.feed.map(entry => ({ ...entry, time: new Date(entry.time).toLocaleTimeString('en-GB') })),

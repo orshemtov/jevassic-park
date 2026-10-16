@@ -62,6 +62,7 @@ export function drawAmbientCrowdTile(
   ctx: CanvasRenderingContext2D,
   visitors: AmbientVisitor[] | undefined,
   tick: number,
+  celebrating = false,
 ): void {
   if (!visitors?.length) return;
   for (const visitor of visitors) {
@@ -74,6 +75,12 @@ export function drawAmbientCrowdTile(
     ctx.fillRect(x - 1.5, y - 4, 3, 3.5);
     ctx.fillStyle = '#edc5a5';
     ctx.fillRect(x - 1, y - 6.2, 2, 2.2);
+    if (celebrating && visitor.phase < .5) {
+      const wave = Math.sin(tick * .3 + visitor.phase * 8);
+      ctx.fillStyle = '#edc5a5';
+      ctx.fillRect(x - 2.7, y - 5.5 + wave, 1.2, 2);
+      ctx.fillRect(x + 1.5, y - 5.5 - wave, 1.2, 2);
+    }
     ctx.fillStyle = '#493a32';
     ctx.fillRect(x - 1, y - 6.5, 2, .8);
   }

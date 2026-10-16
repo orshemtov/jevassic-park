@@ -22,8 +22,8 @@ export function nextParkTrack(current: number, remaining: number[]): number {
 }
 
 export function parkEventMusic(text: string): string | null {
-  if (/parade/i.test(text)) return '/assets/music/parade-fanfare.m4a';
+  if (/parade|fireworks/i.test(text)) return '/assets/music/parade-fanfare.m4a';
   if (/free\s+hot\s*dogs?/i.test(text)) return '/assets/music/snack-time.m4a';
-  if (/carousel|ferris wheel|sky swing/i.test(text)) return '/assets/music/ride-fanfare.m4a';
+  if (/carousel|ferris wheel|sky swing|fountain show/i.test(text)) return '/assets/music/ride-fanfare.m4a';
   return null;
 }

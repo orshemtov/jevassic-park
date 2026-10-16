@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { GameState } from '@/games/coaster/types/game';
+import { createParkSpectacle } from './spectacles';
 import { getGuestActions } from './decisions';
 import { advanceWatchWorld, applyWatchDecisions, buildWatchBatch, createWatchWorld, watchEnvironment } from './watchEngine';
 
@@ -8,6 +9,13 @@ const park: GameState = JSON.parse(readFileSync('public/parks/showcase.json', 'u
 const now = Date.UTC(2026, 9, 16);
 
 describe('shared spectator world', () => {
+  it('shares spectacle timing and removes expired spectacles', () => {
+    const world = createWatchWorld(park, 10, now);
+    world.spectacle = createParkSpectacle(park, 'parade', now);
+    world.nextAnnouncementAt = Number.MAX_SAFE_INTEGER;
+    expect(advanceWatchWorld(world, park, now + 5000).spectacle).toEqual(world.spectacle);
+    expect(advanceWatchWorld(world, park, now + 240000).spectacle).toBeUndefined();
+  });
   it('cycles visible weather from watched time and daylight from wall time', () => {
     const world = createWatchWorld(park, 10, now);
     const initial = watchEnvironment(world, park);
@@ -110,6 +118,7 @@ describe('shared spectator world', () => {
 it('offers the announced parade to every broadcast batch without forcing attendance', () => {
   let world = createWatchWorld(park, 10, now);
   world = advanceWatchWorld({ ...world, watchedMs: 45000 }, park, now);
+  world.spectacle = createParkSpectacle(park, 'parade', now);
   world.announcement!.text = 'The parade is starting. Front-row enthusiasm encouraged.';
   const parade = park.grid.flat().find(tile => tile.building.type === 'show_parade_float')!;
   const target = `ride:${parade.x},${parade.y}`;
@@ -132,6 +141,7 @@ it('offers the announced parade to every broadcast batch without forcing attenda
 it('only attributes choices matching the announcement to the radio', () => {
   let world = createWatchWorld(park, 10, now);
   world = advanceWatchWorld({ ...world, watchedMs: 45000 }, park, now);
+  world.spectacle = createParkSpectacle(park, 'parade', now);
   world.announcement!.text = 'The parade is starting.';
   const batch = buildWatchBatch(world, park);
   const parade = batch.actors[0].actions.find(action => /parade/i.test(action.label))!;
@@ -149,4 +159,25 @@ it('only attributes choices matching the announcement to the radio', () => {
     .toEqual({ id: world.announcement!.id, text: 'The parade is starting.', at: world.announcement!.at });
   expect(next.feed.some(entry => entry.guestId === batch.actors[1].id)).toBe(false);
   expect(next.feed.find(entry => entry.guestId === batch.actors[2].id)?.radio).toBeUndefined();
+});
+
+
+it('keeps a running show while broadcasting other park news', () => {
+  let world = createWatchWorld(park, 10, now);
+  world.spectacle = createParkSpectacle(park, 'fountain', now);
+  world.watchedMs = 45000;
+  world = advanceWatchWorld(world, park, now + 5000);
+  expect(world.spectacle?.kind).toBe('fountain');
+  expect(world.spectacle?.startedAt).toBe(now);
+  expect(world.announcement?.text).not.toMatch(/parade|fountain show|fireworks/i);
+});
+
+it('offers only continuation when a broadcast show will finish before arrival', () => {
+  let world = createWatchWorld(park, 10, now);
+  world = advanceWatchWorld({ ...world, watchedMs: 45000 }, park, now);
+  world.spectacle = createParkSpectacle(park, 'parade', now);
+  world.announcement!.text = 'The parade is starting.';
+  const batch = buildWatchBatch(world, park, now + world.spectacle!.durationMs - 10000);
+  expect(batch.actors).toHaveLength(8);
+  expect(batch.actors.every(actor => actor.actions.length === 1 && actor.actions[0].id === 'continue')).toBe(true);
 });

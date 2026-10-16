@@ -18,6 +18,8 @@ import { useCoasterCloudSystem, Cloud } from '@/components/coaster/cloudSystem';
 import { drawBeachOnWater } from '@/components/game/drawing';
 import { attractionActivity, activityEvents, activityEventText, activityLabels, type ActivityEvent } from '@/lib/jev/attractionActivity';
 import { createAmbientCrowd, drawAmbientCrowdTile } from '@/lib/jev/ambientCrowd';
+import type { ParkSpectacle } from '@/lib/jev/spectacles';
+import { drawParadeTile, drawSpectacleSky, drawGuestCelebration } from './spectacleDrawing';
 
 // Track tools that support drag-to-draw
 const TRACK_DRAG_TOOLS: Tool[] = [
@@ -2621,10 +2623,12 @@ interface CoasterGridProps {
   followGuestId?: string | null;
   guestPopup?: { guestId: string; content: React.ReactNode };
   onFollowStop?: () => void;
+  onManualCameraMove?: () => void;
+  spectacle?: ParkSpectacle;
   selectedTile: { x: number; y: number } | null;
   ambientVisitors?: number;
   reactionMarks?: { id: string; icon: string; at: number }[];
-  navigationTarget?: { x: number; y: number; zoom?: number } | null;
+  navigationTarget?: { x: number; y: number; zoom?: number; smooth?: boolean } | null;
   onNavigationComplete?: () => void;
   onGuestClick?: (id: string) => void;
   onBuildingClick?: (building: { x: number; y: number; type: string }) => void;
@@ -2640,6 +2644,8 @@ export function CoasterGrid({
   followGuestId,
   guestPopup,
   onFollowStop,
+  onManualCameraMove,
+  spectacle,
   selectedTile,
   ambientVisitors = 0,
   reactionMarks = [],
@@ -2782,6 +2788,22 @@ export function CoasterGrid({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const pointerDownRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const cameraInitializedRef = useRef(false);
+  const cameraAnimationRef = useRef<number | null>(null);
+  const cameraRef = useRef({ offset, zoom });
+  useEffect(() => { cameraRef.current = { offset, zoom }; }, [offset, zoom]);
+  const reducedMotionRef = useRef(false);
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reducedMotionRef.current = preference.matches;
+    const update = () => { reducedMotionRef.current = preference.matches; };
+    preference.addEventListener('change', update);
+    return () => preference.removeEventListener('change', update);
+  }, []);
+  const manualCameraMove = useCallback(() => {
+    if (cameraAnimationRef.current !== null) cancelAnimationFrame(cameraAnimationRef.current);
+    cameraAnimationRef.current = null;
+    onManualCameraMove?.();
+  }, [onManualCameraMove]);
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const isTouchDraggingRef = useRef(false);
   const initialPinchDistanceRef = useRef<number | null>(null);
@@ -2899,20 +2921,29 @@ export function CoasterGrid({
     return () => cancelAnimationFrame(frame);
   }, [grid, canvasSize, zoom]);
   
-  // Navigate to target
+  // Automatic shots ease gently; direct guest selections remain immediate.
   useEffect(() => {
     if (!navigationTarget) return;
     cameraInitializedRef.current = true;
-    const frame = requestAnimationFrame(() => {
-      const { screenX, screenY } = gridToScreen(navigationTarget.x, navigationTarget.y, 0, 0);
-      const targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, navigationTarget.zoom ?? zoom));
-      setZoom(targetZoom);
-      setOffset({ x: canvasSize.width / 2 - (screenX + TILE_WIDTH / 2) * targetZoom,
-        y: canvasSize.height / 2 - (screenY + TILE_HEIGHT / 2) * targetZoom });
-      onNavigationComplete?.();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [navigationTarget, canvasSize, zoom, onNavigationComplete]);
+    const start = cameraRef.current;
+    const { screenX, screenY } = gridToScreen(navigationTarget.x, navigationTarget.y, 0, 0);
+    const targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, navigationTarget.zoom ?? start.zoom));
+    const target = { x: canvasSize.width / 2 - (screenX + TILE_WIDTH / 2) * targetZoom,
+      y: canvasSize.height / 2 - (screenY + TILE_HEIGHT / 2) * targetZoom };
+    const duration = navigationTarget.smooth && !reducedMotionRef.current ? 900 : 0;
+    const started = performance.now();
+    const frame = (now: number) => {
+      const progress = duration ? Math.min(1, (now - started) / duration) : 1;
+      const eased = progress * progress * (3 - 2 * progress);
+      setZoom(start.zoom + (targetZoom - start.zoom) * eased);
+      setOffset({ x: start.offset.x + (target.x - start.offset.x) * eased,
+        y: start.offset.y + (target.y - start.offset.y) * eased });
+      if (progress < 1) cameraAnimationRef.current = requestAnimationFrame(frame);
+      else { cameraAnimationRef.current = null; onNavigationComplete?.(); }
+    };
+    cameraAnimationRef.current = requestAnimationFrame(frame);
+    return () => { if (cameraAnimationRef.current !== null) cancelAnimationFrame(cameraAnimationRef.current); };
+  }, [navigationTarget, canvasSize, onNavigationComplete]);
 
   useEffect(() => {
     if (!followGuestId || navigationTarget || isDragging) return;
@@ -3270,12 +3301,21 @@ const tile = grid[y][x];
           );
         }
         
-        drawAmbientCrowdTile(ctx, ambientCrowd.get(`${x},${y}`), tick);
+        if (spectacle) drawParadeTile(ctx, spectacle, Date.now(), x, y, reducedMotionRef.current);
+        const celebrating = !!spectacle && !reducedMotionRef.current && Date.now() >= spectacle.startedAt &&
+          Date.now() < spectacle.startedAt + spectacle.durationMs &&
+          (x - spectacle.center.x) ** 2 + (y - spectacle.center.y) ** 2 < 81;
+        drawAmbientCrowdTile(ctx, ambientCrowd.get(`${x},${y}`), tick, celebrating);
         // Draw guests on this tile
         const guests = guestsByTile.get(`${x},${y}`);
         if (guests) {
           guests.forEach(guest => {
-            drawGuest(ctx, guest, tick);
+            const venue = (guest.queueRideId ?? guest.targetBuildingId)?.split(',').map(Number);
+            const venueType = venue ? grid[venue[1]]?.[venue[0]]?.building?.type ?? '' : '';
+            const audience = guest.state === 'riding' && /show_parade|fountain|castle/.test(venueType);
+            const visibleGuest = audience ? { ...guest, state: 'watching' as const } : guest;
+            drawGuest(ctx, visibleGuest, tick);
+            drawGuestCelebration(ctx, visibleGuest, guestScreenPoint(visibleGuest), spectacle, Date.now(), reducedMotionRef.current);
             const mark = reactionsByGuest.get(guest.id);
             if (mark && Date.now() - mark.at < 5000) {
               const next = gridToScreen(guest.targetTileX, guest.targetTileY, 0, 0);
@@ -3337,6 +3377,8 @@ const tile = grid[y][x];
       }
     }
     
+    if (spectacle) drawSpectacleSky(ctx, spectacle, Date.now(), reducedMotionRef.current);
+
     // Multi-tile building sprites are now drawn inline during the main loop
     // when we reach their "front corner" tile for correct isometric depth ordering
     
@@ -3370,7 +3412,7 @@ const tile = grid[y][x];
       if ((!activity && !event) || box.left > viewRight || box.left + box.width < viewLeft || box.top > viewBottom || box.top + box.height < viewTop) continue;
       ctx.save();
       const cx = box.left + box.width * .5;
-      if (box.building.type === 'show_parade_float') {
+      if (box.building.type === 'show_parade_float' && !reducedMotionRef.current) {
         for (let confetti = 0; confetti < 12; confetti++) {
           ctx.fillStyle = ['#ffe575', '#f591bf', '#8ae6ee'][confetti % 3];
           const phase = (tick * .035 + confetti * .37) % 2;
@@ -3382,7 +3424,7 @@ const tile = grid[y][x];
       ctx.scale(1 / zoom, 1 / zoom);
       ctx.font = 'bold 11px system-ui';
       const label = activity ? Object.entries(activity).filter(([kind, count]) => count > 0 && kind !== 'heading')
-        .map(([kind, count]) => `${count} ${activityLabels[kind as keyof typeof activity]}`).join(' · ') : '';
+        .map(([kind, count]) => `${count} ${kind === 'riding' && /show_parade|fountain|castle/.test(box.building.type) ? 'Watching' : activityLabels[kind as keyof typeof activity]}`).join(' · ') : '';
       if (label) {
         const width = ctx.measureText(label).width + 14;
         ctx.fillStyle = '#213b2eed';
@@ -3395,7 +3437,7 @@ const tile = grid[y][x];
       }
       if (event) {
         const elapsed = Date.now() - event.at;
-        const text = activityEventText(event);
+        const text = /show_parade|fountain|castle/.test(box.building.type) && event.kind === 'riding' ? '✨ Finding a good view!' : activityEventText(event);
         const width = ctx.measureText(text).width + 24;
         const y = -44 - Math.min(10, elapsed / 400);
         ctx.globalAlpha = Math.min(1, (7000 - elapsed) / 1500, elapsed / 200);
@@ -3440,7 +3482,7 @@ const tile = grid[y][x];
     }
     
     ctx.restore();
-  }, [grid, gridSize, offset, zoom, canvasSize, tick, selectedTile, hoveredTile, selectedTool, spriteSheets, waterImage, state, trackDragPreviewTiles, isTrackDragging, coasterInfoMap, incompleteTrackEnds, reactionsByGuest, ambientCrowd, buildingSpriteHitboxes]);
+  }, [grid, gridSize, offset, zoom, canvasSize, tick, selectedTile, hoveredTile, selectedTool, spriteSheets, waterImage, state, trackDragPreviewTiles, isTrackDragging, coasterInfoMap, incompleteTrackEnds, reactionsByGuest, ambientCrowd, buildingSpriteHitboxes, spectacle]);
   
   // Lighting canvas sizing
   useEffect(() => {
@@ -3588,6 +3630,7 @@ const tile = grid[y][x];
     if (isDragging) {
       if (pointerDownRef.current && Math.hypot(e.clientX - pointerDownRef.current.x, e.clientY - pointerDownRef.current.y) > 6) {
         pointerDownRef.current.moved = true;
+        manualCameraMove();
         onFollowStop?.();
       }
       setOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
@@ -3617,7 +3660,7 @@ const tile = grid[y][x];
     }
     const building = inspectBuildingSprite(buildingSpriteHitboxes, worldX, worldY) ?? inspectBuilding(grid, gridX, gridY);
     setHoveredBuilding(previous => previous?.x === building?.x && previous?.y === building?.y && previous?.type === building?.type ? previous : building);
-  }, [isDragging, dragStart, offset, zoom, gridSize, grid, buildingSpriteHitboxes, onFollowStop]);
+  }, [isDragging, dragStart, offset, zoom, gridSize, grid, buildingSpriteHitboxes, onFollowStop, manualCameraMove]);
   
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (e.button === 0 && pointerDownRef.current && !pointerDownRef.current.moved) inspectAt(e.clientX, e.clientY);
@@ -3627,6 +3670,7 @@ const tile = grid[y][x];
   
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
+    manualCameraMove();
     
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -3646,7 +3690,7 @@ const tile = grid[y][x];
       onFollowStop?.();
       setOffset(previous => ({ ...previous, y: previous.y - e.deltaY }));
     }
-  }, [zoom, offset, onFollowStop]);
+  }, [zoom, offset, onFollowStop, manualCameraMove]);
 
   const getTouchDistance = useCallback((touch1: React.Touch, touch2: React.Touch) => {
     const dx = touch1.clientX - touch2.clientX;
@@ -3684,6 +3728,7 @@ const tile = grid[y][x];
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
+    manualCameraMove();
 
     if (e.touches.length === 1 && isTouchDraggingRef.current && !initialPinchDistanceRef.current) {
       onFollowStop?.();
@@ -3717,7 +3762,7 @@ const tile = grid[y][x];
         lastTouchCenterRef.current = currentCenter;
       }
     }
-  }, [dragStart, zoom, offset, getTouchDistance, getTouchCenter, onFollowStop]);
+  }, [dragStart, zoom, offset, getTouchDistance, getTouchCenter, onFollowStop, manualCameraMove]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 0) {

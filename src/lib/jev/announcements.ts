@@ -3,11 +3,14 @@ export const PARK_ANNOUNCEMENTS = [
   'The parade is starting. Front-row enthusiasm encouraged.',
   'The Sky Swing is boarding. Bags down, bravery up.',
   'The Ferris wheel offers excellent views of your questionable decisions.',
+  'The fountain show is starting. Front row may get splashed.',
   'The carousel is boarding. Pick your noble steed.',
 ];
 
-export function nextParkAnnouncement(previous?: string): string {
-  const choices = PARK_ANNOUNCEMENTS.filter(text => text !== previous);
+export function nextParkAnnouncement(previous?: string, hour = 12, allowSpectacles = true): string {
+  if (allowSpectacles && (hour >= 20 || hour < 7) && !/fireworks/i.test(previous ?? '')) return 'Fireworks above the castle! Come watch the sky sparkle.';
+  const available = allowSpectacles ? PARK_ANNOUNCEMENTS : PARK_ANNOUNCEMENTS.filter(text => !/parade|fountain show|fireworks/i.test(text));
+  const choices = available.filter(text => text !== previous);
   return choices[Math.floor(Math.random() * choices.length)];
 }
 

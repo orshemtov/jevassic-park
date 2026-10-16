@@ -11,7 +11,10 @@
 - **5,000 visitors**, with 100 individually simulated guests making decisions through Jev.
 - **One shared park** for every spectator. Spending happens while people watch.
 - **Live decisions** with guest names. Follow a choice to follow its guest.
-- **Random announcements** that give guests a reason to change plans.
+- **Live spectacles:** moving parades, fountain shows and nighttime fireworks. Guests choose whether to join.
+- **Auto camera:** smooth highlight shots; pan, zoom or select a guest to take over.
+- **Guest stories:** observed milestones, repeat rides and snack rescues.
+- Waving crowds, balloons, cheers and splash reactions. Reduced motion supported.
 - Animated rides, water, weather, day and night.
 - **Music:** five original fantasy tracks, shuffled, with parade, snack and ride cues.
 - A local admin mode for testing crowds, budgets, tempo and broadcasts.

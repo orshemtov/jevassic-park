@@ -2,6 +2,7 @@ import { chargeGuestForActivity, createGuest, updateGuest } from '@/components/c
 import type { Guest } from '@/games/coaster/types/economy';
 import type { GameState } from '@/games/coaster/types/game';
 import { chooseOffline, getGuestActions, isDecisionBoundary, type GuestAction, type ActionKind, announcedAttraction } from './decisions';
+import { createParkSpectacle, spectacleForAnnouncement, type ParkSpectacle } from './spectacles';
 import { watchEnvironment } from './environment';
 export { watchEnvironment } from './environment';
 import { summarizePark, type ParkState } from './parkState';
@@ -14,6 +15,7 @@ export type WatchWorld = {
   population: number; detailedGuests?: number; updatedAt: number; nextDecisionAt: number; leaseUntil: number;
   lastDecided?: Record<string, number>;
   budgetExhausted?: boolean; day: string; spent: number; reserved: number; watchedMs: number; nextAnnouncementAt: number;
+  spectacle?: ParkSpectacle;
   announcement?: { id: number; text: string; at: number; park: ParkState; pending: string[]; total: number; processed: number; changed: number; stayed: number; responded?: number };
 };
 
@@ -69,10 +71,13 @@ export function advanceWatchWorld(world: WatchWorld, park: GameState, now: numbe
   while (guests.length < count) guests.push(spawn(park));
   const next: WatchWorld = { ...world, guests, tick: world.tick + ticks, watchedMs: world.watchedMs + ticks * 50, updatedAt: now,
     ...(world.day !== day(now) ? { day: day(now), spent: 0, reserved: 0, budgetExhausted: false } : {}) };
+  if (next.spectacle && now - next.spectacle.startedAt >= next.spectacle.durationMs) delete next.spectacle;
   // Finish exposing one broadcast before starting another, including deferred busy guests.
   if (next.watchedMs >= next.nextAnnouncementAt && !next.announcement?.pending.length) {
     const id = (next.announcement?.id ?? 0) + 1;
-    const text = nextParkAnnouncement(next.announcement?.text);
+    const text = nextParkAnnouncement(next.announcement?.text, watchEnvironment(next, park).hour, !next.spectacle);
+    const kind = spectacleForAnnouncement(text);
+    if (kind) next.spectacle = createParkSpectacle(park, kind, now);
     const snapshot = summarizePark(currentPark(next, park), /free hot dogs/i.test(text));
     next.announcement = { id, text, at: now, park: snapshot, pending: guests.map(guest => guest.id), total: guests.length, processed: 0, changed: 0, stayed: 0, responded: 0 };
     next.nextAnnouncementAt = next.watchedMs + announcementDelay();
@@ -84,7 +89,7 @@ export function advanceWatchWorld(world: WatchWorld, park: GameState, now: numbe
   return next;
 }
 
-export function buildWatchBatch(world: WatchWorld, park: GameState, _now?: number): { actors: WatchActor[]; park: ParkState; announcement?: string } {
+export function buildWatchBatch(world: WatchWorld, park: GameState, now = world.updatedAt): { actors: WatchActor[]; park: ParkState; announcement?: string } {
   const pending = new Set(world.announcement?.pending);
   const broadcast = world.announcement?.pending.length && world.guests.some(guest => pending.has(guest.id) &&
     ['walking', 'entering', 'queuing', 'leaving'].includes(guest.state)) ? world.announcement : undefined;
@@ -94,7 +99,11 @@ export function buildWatchBatch(world: WatchWorld, park: GameState, _now?: numbe
   const snapshot = broadcast?.park ?? summarizePark(currentPark(world, park), false);
   const actors = guests.map(guest => {
     const { hunger, thirst, energy, bathroom, nausea, happiness, cash, preferExcitement, preferIntensity, timeInPark } = guest;
-    const actions = getGuestActions(park.grid, guest, snapshot.freeHotdogs, broadcast?.text);
+    const show = broadcast ? spectacleForAnnouncement(broadcast.text) : undefined;
+    const remaining = world.spectacle && show === world.spectacle.kind
+      ? world.spectacle.startedAt + world.spectacle.durationMs - now : show ? 0 : Infinity;
+    const actions = getGuestActions(park.grid, guest, snapshot.freeHotdogs, broadcast?.text)
+      .filter(action => !show || action.distance * 2500 + 20_000 <= remaining);
     if (broadcast) actions.push({ id: 'continue', kind: 'continue', label: 'Keep current plan', price: 0, distance: 0, queue: 0, path: [] });
     return { id: guest.id, guest: { hunger, thirst, energy, bathroom, nausea, happiness, cash, preferExcitement, preferIntensity, timeInPark, ridesRidden: guest.ridesRidden.slice(-32), activity: guest.state }, actions };
   });

@@ -1,4 +1,5 @@
 import { DEFAULT_PRICES, type Guest } from '@/games/coaster/types/economy';
+import { findSpectacleVenue, spectacleForAnnouncement } from './spectacles';
 import { TOOL_INFO, type Tile, type Tool } from '@/games/coaster/types/game';
 
 export type ActionKind = 'ride' | 'food' | 'drink' | 'shop' | 'restroom' | 'wait' | 'leave' | 'continue';
@@ -62,6 +63,8 @@ export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = fals
     return path.reverse();
   };
 
+  const show = spectacleForAnnouncement(announcement);
+  const venue = show ? findSpectacleVenue(grid, show) : undefined;
   const candidates: GuestAction[] = [];
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const type = grid[y][x].building?.type ?? '';
@@ -72,6 +75,9 @@ export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = fals
     else if (type.startsWith('food_') || type.startsWith('snack_') || type.startsWith('cart_')) kind = 'food';
     else if (type === 'restroom') kind = 'restroom';
     else if (type.startsWith('shop_') || type.startsWith('game_') || type === 'arcade_building') kind = 'shop';
+    const isVenue = venue?.x === x && venue?.y === y;
+    const scenicShow = isVenue && (show === 'fountain' || show === 'fireworks');
+    if (scenicShow) kind = 'ride';
     if (!kind) continue;
     const reachable = directions.map(([dx, dy]) => key(x + dx, y + dy))
       .filter(tile => previous.has(tile))
@@ -81,13 +87,14 @@ export function getGuestActions(grid: Tile[][], guest: Guest, freeHotdogs = fals
     const price = freeHotdogs && type === 'food_hotdog' ? 0 : kind === 'drink' ? DEFAULT_PRICES.drinkItem :
       kind === 'food' ? DEFAULT_PRICES.foodItem : kind === 'shop' ? DEFAULT_PRICES.shopItem : 0;
     if (guest.cash < price) continue;
-    candidates.push({ id: `${kind}:${x},${y}`, kind, label: attractionName(type), price,
+    candidates.push({ id: `${kind}:${x},${y}`, kind, label: scenicShow ? show === 'fountain' ? 'Fountain show' : 'Fireworks' : attractionName(type), price,
       distance: reachable.length, queue: 0, path: reachable, buildingId: key(x, y) });
   }
 
   candidates.sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id));
   const picked: GuestAction[] = [];
-  const promoted = candidates.find(candidate => announcedAttraction(announcement, candidate.label));
+  const promoted = candidates.find(candidate => announcedAttraction(announcement, candidate.label) &&
+    (!show || candidate.buildingId === `${venue?.x},${venue?.y}`));
   // Radio offers a specific detour; unrelated needs stay in the normal decision loop.
   if (announcement) return promoted ? [promoted] : [];
   for (const kind of ['ride', 'food', 'drink', 'shop', 'restroom'] as const) {
@@ -133,7 +140,7 @@ export function chooseOffline(guest: ChoosingGuest, actions: Pick<GuestAction, '
 }
 
 export function announcedAttraction(announcement: string, label: string): boolean {
-  return [/parade/i, /ferris wheel/i, /carousel/i, /sky swing/i, /hot\s*dogs?/i]
+  return [/parade/i, /ferris wheel/i, /carousel/i, /sky swing/i, /hot\s*dogs?/i, /fountain show/i, /fireworks/i]
     .some(pattern => pattern.test(announcement) && pattern.test(label));
 }
 

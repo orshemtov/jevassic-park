@@ -10,11 +10,11 @@ export function previewDecisions(park: GameState) {
   });
 }
 
-export function previewAnnouncementDecisions(park: GameState, text: string) {
+export function previewAnnouncementDecisions(park: GameState, text: string, remainingMs = Infinity) {
   return park.guests.map(guest => {
     const keep = { id: 'continue', kind: 'continue' as const, label: 'Keep current plan', price: 0, distance: 0, queue: 0, path: [] };
     const actions = ['walking', 'entering', 'queuing', 'leaving'].includes(guest.state)
-      ? [keep, ...getGuestActions(park.grid, guest, /free hot dogs/i.test(text), text)] : [keep];
+      ? [keep, ...getGuestActions(park.grid, guest, /free hot dogs/i.test(text), text).filter(action => action.distance * 2500 + 20_000 <= remainingMs)] : [keep];
     const action = actions.find(option => option.id === chooseOfflineAnnouncement(guest, actions, text)) ?? keep;
     return { guest, action, label: action.kind === 'continue' ? 'Kept their plan' : `Chose ${action.label}` };
   });
